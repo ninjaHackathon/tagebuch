@@ -5,12 +5,39 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Ernährungstagebuch</title>
 <style> html, body, #root { height: 100%; } body { margin: 0; } </style>
+<script>
+  function showError(msg) {
+    var el = document.getElementById("root");
+    if (!el) return;
+    el.innerHTML = '<div style="font-family:-apple-system,sans-serif;padding:20px;color:#9a1414;white-space:pre-wrap;line-height:1.5;font-size:14px;">' +
+      '<strong>Fehler beim Laden</strong><br><br>' + msg +
+      '<br><br><span style="color:#6b7472;">Bitte Screenshot davon schicken.</span></div>';
+  }
+  window.addEventListener("error", function (e) {
+    if (e && e.target && e.target.tagName === "SCRIPT") {
+      showError("Eine Skript-Datei konnte nicht geladen werden:\n" + (e.target.src || "unbekannt") + "\n\nBitte Internetverbindung pr\u00fcfen (WLAN/Mobilfunk wechseln) und neu laden.");
+    } else if (e && e.message) {
+      showError(e.message + (e.filename ? ("\n" + e.filename + ":" + e.lineno) : ""));
+    }
+  }, true);
+  window.addEventListener("unhandledrejection", function (e) {
+    showError(e && e.reason ? String(e.reason) : "Unbekannter Fehler (Promise)");
+  });
+</script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div style="font-family:-apple-system,sans-serif;padding:24px;color:#6b7472;">L\u00e4dt Ern\u00e4hrungstagebuch \u2026</div></div>
+<script>
+  setTimeout(function () {
+    var el = document.getElementById("root");
+    if (el && el.getAttribute("data-mounted") !== "true") {
+      showError("Die Seite hat nach mehreren Sekunden nicht geladen.\n\nM\u00f6gliche Ursache: eine ben\u00f6tigte Datei (React/Babel) konnte nicht geladen werden.");
+    }
+  }, 8000);
+</script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef } = React;
 
@@ -34,6 +61,792 @@ const SEV_COLS = [
   { id: "reflux_nacht", label: "Reflux Nacht" },
   { id: "weinen_tag", label: "Weinen Tag" },
   { id: "weinen_abends", label: "Weinen Abends" },
+];
+
+const FOODS = [
+  { id: "f_kapseln", label: "Kapseln" },
+  { id: "f_eier", label: "Eier" },
+  { id: "f_milch", label: "Milch" },
+  { id: "f_lebertran", label: "Lebertran" },
+  { id: "f_knochenbruehe", label: "Knochenbrühe" },
+  { id: "f_nachtschatten", label: "Nachtschatten" },
+  { id: "f_obst", label: "Obst" },
+  { id: "f_rindfleisch", label: "Rindfleisch" },
+];
+
+const DEFAULT_NEM = ["Zn", "Mg", "Vit C", "Vit D", "Elektrolyte", "Jod", "Cu", "Se", "Vit B", "Bitter"];
+const STORAGE_KEY = "ernaehrungstagebuch:v2";
+
+// ---------- Datum ----------
+const iso = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const parseISO = (s) => {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+};
+const fmtShort = (s) => {
+  const d = parseISO(s);
+  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.`;
+};
+function buildRange(minISO, maxISO) {
+  const out = [];
+  let d = parseISO(minISO);
+  const end = parseISO(maxISO);
+  while (d <= end) {
+    out.push(iso(d));
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  }
+  return out;
+}
+
+
+function parseCSV(text) {
+  text = text.replace(/^\uFEFF/, "");
+  const rows = []; let row = []; let field = ""; let inQ = false; let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i += 2; continue; } inQ = false; i++; continue; }
+      field += c; i++; continue;
+    } else {
+      if (c === '"') { inQ = true; i++; continue; }
+      if (c === ",") { row.push(field); field = ""; i++; continue; }
+      if (c === "\r") { i++; continue; }
+      if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
+      field += c; i++; continue;
+    }
+  }
+  row.push(field); rows.push(row);
+  return rows.filter((r) => !(r.length === 1 && r[0] === ""));
+}
+
+// ---------- Speicher ----------
+function loadState() {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY);
+    if (v) return JSON.parse(v);
+  } catch (e) {}
+  return null;
+}
+function saveState(state) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {}
+}
+
+// ================= App =================
+function App() {
+  const [entries, setEntries] = useState({});
+  const [customRows, setCustomRows] = useState([]);
+  const [nemOptions, setNemOptions] = useState(DEFAULT_NEM);
+  const [loaded, setLoaded] = useState(false);
+  const [modal, setModal] = useState(null);
+  const [analysis, setAnalysis] = useState(null);
+  const firstSave = useRef(true);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    const r = document.getElementById("root");
+    if (r) r.setAttribute("data-mounted", "true");
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const saved = await loadState();
+      const today = iso(new Date());
+      let ent = saved?.entries || {};
+      const cr = saved?.customRows || saved?.customCols || [];
+      const nem = saved?.nemOptions || DEFAULT_NEM;
+      const keys = Object.keys(ent);
+      const min = keys.length ? keys.sort()[0] : today;
+      const range = buildRange(min, today);
+      const next = { ...ent };
+      range.forEach((d) => { if (!next[d]) next[d] = emptyDay(); });
+      setEntries(next);
+      setCustomRows(cr);
+      setNemOptions(nem);
+      setLoaded(true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (firstSave.current) { firstSave.current = false; return; }
+    saveState({ entries, customRows, nemOptions });
+  }, [entries, customRows, nemOptions, loaded]);
+
+  useEffect(() => {
+    if (loaded && scrollRef.current) {
+      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+    }
+  }, [loaded]);
+
+  const dates = Object.keys(entries).sort();
+  const daysAsc = [...dates]; // aufsteigend: links Vergangenheit, rechts heute
+
+  function emptyDay() {
+    const d = { verstopfung: null, notiz: "", nem: [] };
+    SEV_COLS.forEach((c) => (d[c.id] = ""));
+    FOODS.forEach((f) => (d[f.id] = null));
+    return d;
+  }
+  function update(date, id, value) {
+    setEntries((p) => ({ ...p, [date]: { ...p[date], [id]: value } }));
+  }
+  function cycle(date, id) {
+    setEntries((p) => {
+      const cur = p[date][id];
+      const next = cur == null ? true : cur === true ? false : null;
+      return { ...p, [date]: { ...p[date], [id]: next } };
+    });
+  }
+  function addRow() {
+    setModal({ type: "input", title: "Neue Kategorie", placeholder: "Name der Kategorie", submitLabel: "Hinzuf\u00fcgen", initial: "", action: { kind: "addrow" } });
+  }
+  function applyAddRow(name) {
+    setCustomRows((p) => [...p, { id: "c_" + Date.now(), label: name }]);
+  }
+  function applyRenameRow(id, name) {
+    setCustomRows((p) => p.map((r) => (r.id === id ? { ...r, label: name } : r)));
+  }
+  function applyDeleteRow(id) {
+    setCustomRows((p) => p.filter((r) => r.id !== id));
+    setEntries((p) => {
+      const next = {};
+      Object.keys(p).forEach((d) => {
+        const e = { ...p[d] };
+        delete e[id];
+        next[d] = e;
+      });
+      return next;
+    });
+  }
+  function applyRenameNem(oldName, name) {
+    if (name === oldName) return;
+    setNemOptions((p) => p.map((x) => (x === oldName ? name : x)));
+    setEntries((p) => {
+      const next = {};
+      Object.keys(p).forEach((d) => {
+        const e = p[d];
+        next[d] = { ...e, nem: (e.nem || []).map((x) => (x === oldName ? name : x)) };
+      });
+      return next;
+    });
+  }
+  function applyDeleteNem(name) {
+    setNemOptions((p) => p.filter((x) => x !== name));
+    setEntries((p) => {
+      const next = {};
+      Object.keys(p).forEach((d) => {
+        const e = p[d];
+        next[d] = { ...e, nem: (e.nem || []).filter((x) => x !== name) };
+      });
+      return next;
+    });
+  }
+  // Fuehrt die im Modal gewaehlte Aktion aus und kehrt ggf. zum NEM-Fenster zurueck
+  function runModalAction(action, value) {
+    if (action.kind === "addrow") applyAddRow(value);
+    if (action.kind === "renamerow") applyRenameRow(action.id, value);
+    if (action.kind === "delrow") applyDeleteRow(action.id);
+    if (action.kind === "renamenem") applyRenameNem(action.name, value);
+    if (action.kind === "delnem") applyDeleteNem(action.name);
+    if (action.backToNem) setModal({ type: "nem", date: action.backToNem });
+    else setModal(null);
+  }
+  function addEarlierDays() {
+    setEntries((p) => {
+      const keys = Object.keys(p).sort();
+      const start = parseISO(keys[0]);
+      const next = { ...p };
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() - i);
+        next[iso(d)] = emptyDay();
+      }
+      return next;
+    });
+  }
+  function toggleNem(date, item) {
+    setEntries((p) => {
+      const cur = p[date].nem || [];
+      const nem = cur.includes(item) ? cur.filter((x) => x !== item) : [...cur, item];
+      return { ...p, [date]: { ...p[date], nem } };
+    });
+  }
+  function addNemOption(name) {
+    const n = name.trim();
+    if (!n || nemOptions.includes(n)) return;
+    setNemOptions((p) => [...p, n]);
+  }
+  function exportCSV() {
+    const cols = [
+      { id: "date", label: "Datum" },
+      ...SEV_COLS,
+      { id: "verstopfung", label: "Kaki" },
+      ...FOODS,
+      { id: "nem", label: "NEM" },
+      ...customRows,
+      { id: "notiz", label: "Notizen" },
+    ];
+    const esc = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+    const tri = (v) => (v === true ? "ja" : v === false ? "nein" : "");
+    const head = cols.map((c) => esc(c.label)).join(",");
+    const rows = dates.map((d) => {
+      const e = entries[d];
+      return cols.map((c) => {
+        if (c.id === "date") return esc(d);
+        if (c.id === "nem") return esc((e.nem || []).join("; "));
+        if (c.id === "notiz") return esc(e.notiz || "");
+        if (c.id === "verstopfung") return esc(tri(e.verstopfung));
+        if (SEV_COLS.find((s) => s.id === c.id)) return esc(e[c.id] || "");
+        return esc(tri(e[c.id]));
+      }).join(",");
+    });
+    const csv = [head, ...rows].join("\n");
+    setModal({ type: "csv", csv });
+  }
+  function runAnalysis() {
+    setAnalysis(analyze(entries, dates, customRows, nemOptions));
+  }
+
+  function importCSV(text) {
+    let rows;
+    try { rows = parseCSV(text); } catch (e) { return { ok: false, msg: "Datei konnte nicht gelesen werden." }; }
+    if (!rows || rows.length < 2) return { ok: false, msg: "Keine Daten gefunden." };
+    const header = rows[0].map((h) => h.trim());
+    const dateIdx = header.findIndex((h) => h.toLowerCase() === "datum");
+    if (dateIdx < 0) return { ok: false, msg: 'Spalte "Datum" fehlt \u2013 ist das ein Export dieser App?' };
+    const sevByLabel = {}; SEV_COLS.forEach((c) => (sevByLabel[c.label] = c.id));
+    const foodByLabel = {}; FOODS.forEach((f) => (foodByLabel[f.label] = f.id));
+    const customByLabel = {}; customRows.forEach((c) => (customByLabel[c.label] = c.id));
+    const newCustom = [];
+    const colDesc = header.map((h, i) => {
+      if (i === dateIdx) return { kind: "date" };
+      if (sevByLabel[h]) return { kind: "sev", id: sevByLabel[h] };
+      if (h === "Kaki" || h === "Verstopfung") return { kind: "check", id: "verstopfung" };
+      if (foodByLabel[h]) return { kind: "check", id: foodByLabel[h] };
+      if (h === "NEM") return { kind: "nem" };
+      if (h === "Notizen") return { kind: "notiz" };
+      let id = customByLabel[h];
+      if (!id) { id = "c_" + Date.now() + "_" + i; newCustom.push({ id, label: h }); customByLabel[h] = id; }
+      return { kind: "check", id };
+    });
+    const imported = {}; const nemSet = new Set(nemOptions); let count = 0;
+    for (let r = 1; r < rows.length; r++) {
+      const cells = rows[r];
+      const date = (cells[dateIdx] || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const day = emptyDay();
+      colDesc.forEach((cd, i) => {
+        const val = (cells[i] !== undefined ? cells[i] : "").trim();
+        if (cd.kind === "sev") day[cd.id] = ["kein", "bisschen", "mittel", "viel"].includes(val) ? val : "";
+        else if (cd.kind === "check") day[cd.id] = val.toLowerCase() === "ja" ? true : val.toLowerCase() === "nein" ? false : null;
+        else if (cd.kind === "nem") { const arr = val ? val.split(";").map((x) => x.trim()).filter(Boolean) : []; arr.forEach((x) => nemSet.add(x)); day.nem = arr; }
+        else if (cd.kind === "notiz") day.notiz = val;
+      });
+      imported[date] = day; count++;
+    }
+    if (count === 0) return { ok: false, msg: "Keine g\u00fcltigen Tageszeilen gefunden." };
+    setCustomRows((prev) => { const have = new Set(prev.map((c) => c.label)); return [...prev, ...newCustom.filter((c) => !have.has(c.label))]; });
+    setNemOptions([...nemSet]);
+    setEntries((prev) => {
+      const merged = { ...prev, ...imported };
+      const keys = Object.keys(merged).sort();
+      const today = iso(new Date());
+      const last = keys[keys.length - 1];
+      const range = buildRange(keys[0], today > last ? today : last);
+      range.forEach((d) => { if (!merged[d]) merged[d] = emptyDay(); });
+      return merged;
+    });
+    return { ok: true, msg: count + " Tage importiert. Vorhandene Tage mit gleichem Datum wurden \u00fcberschrieben." };
+  }
+
+
+  if (!loaded) return <div className="loading">Lädt…</div>;
+
+  // Zeilen-Definition (transponiert)
+  const ROWS = [
+    ...SEV_COLS.map((c) => ({ ...c, type: "sev" })),
+    { id: "verstopfung", label: "Kaki", type: "check", sepBelow: true },
+    ...FOODS.map((f, i) => ({ ...f, type: "check", sepBelow: i === FOODS.length - 1 })),
+    { id: "nem", label: "NEM", type: "nem", sepBelow: true },
+    ...customRows.map((c) => ({ ...c, type: "check" })),
+    { id: "notiz", label: "Notizen", type: "notiz" },
+  ];
+  const today = iso(new Date());
+
+  return (
+    <div className="wrap">
+      <Style />
+      <header className="top">
+        <div>
+          <h1>Ernährungstagebuch</h1>
+          <p className="sub">Gestillt · Reaktionen bis 72 h nachwirkend</p>
+        </div>
+        <div className="actions">
+          <button className="btn primary" onClick={runAnalysis}>Analysieren</button>
+          <button className="btn" onClick={addRow}>+ Kategorie</button>
+          <button className="btn" onClick={addEarlierDays}>+ Frühere Tage</button>
+          <button className="btn" onClick={() => setModal({ type: "import" })}>Import</button>
+          <button className="btn" onClick={exportCSV}>CSV</button>
+        </div>
+      </header>
+
+      <div className="legend">
+        <span className="lg lg-kein">kein</span>
+        <span className="lg lg-bisschen">bisschen</span>
+        <span className="lg lg-mittel">mittel</span>
+        <span className="lg lg-viel">viel</span>
+        <span className="lg-sep" />
+        <span className="lg-note">Kästchen tippen: leer → ja (✓) → nein (–) · links liegen frühere Tage</span>
+      </div>
+
+      <div className="scroll" ref={scrollRef}>
+        <table>
+          <thead>
+            <tr>
+              <th className="corner sticky-l"></th>
+              {daysAsc.map((d) => {
+                const wd = WEEKDAYS[parseISO(d).getDay()];
+                return (
+                  <th key={d} className={"dayhead" + (d === today ? " today" : "")}>
+                    <span className="dhv"><span className="dwd">{wd}</span>&nbsp;&nbsp;<span className="ddt">{fmtShort(d)}</span></span>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {ROWS.map((row) => (
+              <tr key={row.id} className={row.sepBelow ? "sepBelow" : ""}>
+                <td className="rowlabel sticky-l">
+                  {row.type === "check" && customRows.some((c) => c.id === row.id) ? (
+                    <button className="rowedit" onClick={() => setModal({ type: "rowedit", rowId: row.id })}>{row.label} <span className="editicon">✎</span></button>
+                  ) : (
+                    row.label
+                  )}
+                </td>
+                {daysAsc.map((d) => {
+                  const e = entries[d];
+                  const tCls = "";
+                  if (row.type === "sev") {
+                    return (
+                      <td key={d} className={"dc" + tCls}>
+                        <div className={"sevwrap sev-" + (e[row.id] || "none")}>
+                          <select className="sevsel" value={e[row.id]} onChange={(ev) => update(d, row.id, ev.target.value)}>
+                            {SEV_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+                          </select>
+                        </div>
+                      </td>
+                    );
+                  }
+                  if (row.type === "check") {
+                    const v = e[row.id];
+                    const cls = v === true ? "yes" : v === false ? "no" : "empty";
+                    const mark = v === true ? "✓" : v === false ? "–" : "";
+                    return (
+                      <td key={d} className={"dc" + tCls}>
+                        <button className={"cell " + cls} onClick={() => cycle(d, row.id)}>{mark}</button>
+                      </td>
+                    );
+                  }
+                  if (row.type === "nem") {
+                    const n = e.nem || [];
+                    return (
+                      <td key={d} className={"dc" + tCls}>
+                        <button className="cell soft" onClick={() => setModal({ type: "nem", date: d })}>
+                          {n.length ? <span className="badge">{n.length}</span> : <span className="ph">+</span>}
+                        </button>
+                      </td>
+                    );
+                  }
+                  // notiz
+                  return (
+                    <td key={d} className={"dc" + tCls}>
+                      <button className="cell soft" onClick={() => setModal({ type: "notiz", date: d })}>
+                        {e.notiz ? <span className="notemark">✎</span> : <span className="ph">+</span>}
+                      </button>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {modal?.type === "nem" && (
+        <NemModal selected={entries[modal.date].nem || []} options={nemOptions}
+          onToggle={(i) => toggleNem(modal.date, i)} onAdd={addNemOption}
+          onRename={(o) => setModal({ type: "input", title: "NEM umbenennen", placeholder: "Neuer Name", submitLabel: "Speichern", initial: o, action: { kind: "renamenem", name: o, backToNem: modal.date } })}
+          onDelete={(o) => setModal({ type: "confirm", text: "NEM \u201E" + o + "\u201C aus der Liste und allen Tagen entfernen?", submitLabel: "Entfernen", action: { kind: "delnem", name: o, backToNem: modal.date } })}
+          onClose={() => setModal(null)} dateLabel={fmtShort(modal.date)} />
+      )}
+      {modal?.type === "notiz" && (
+        <NotizModal value={entries[modal.date].notiz || ""} onChange={(v) => update(modal.date, "notiz", v)}
+          onClose={() => setModal(null)} dateLabel={fmtShort(modal.date)} />
+      )}
+      {modal?.type === "rowedit" && (
+        <RowEditModal
+          label={customRows.find((r) => r.id === modal.rowId)?.label || ""}
+          onRename={() => {
+            const row = customRows.find((r) => r.id === modal.rowId);
+            setModal({ type: "input", title: "Kategorie umbenennen", placeholder: "Neuer Name", submitLabel: "Speichern", initial: row?.label || "", action: { kind: "renamerow", id: modal.rowId } });
+          }}
+          onDelete={() => {
+            const row = customRows.find((r) => r.id === modal.rowId);
+            setModal({ type: "confirm", text: "Kategorie \u201E" + (row?.label || "") + "\u201C l\u00f6schen? Alle Eintr\u00e4ge dieser Zeile gehen verloren.", submitLabel: "L\u00f6schen", action: { kind: "delrow", id: modal.rowId } });
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === "input" && (
+        <InputModal title={modal.title} placeholder={modal.placeholder} submitLabel={modal.submitLabel} initial={modal.initial}
+          onSubmit={(v) => runModalAction(modal.action, v)} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "confirm" && (
+        <ConfirmModal text={modal.text} submitLabel={modal.submitLabel}
+          onConfirm={() => runModalAction(modal.action)} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "import" && (
+        <ImportModal onImport={importCSV} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "csv" && (
+        <CsvModal csv={modal.csv} onClose={() => setModal(null)} />
+      )}
+      {analysis && <AnalysisModal text={analysis} onClose={() => setAnalysis(null)} />}
+    </div>
+  );
+}
+
+function NemModal({ selected, options, onToggle, onAdd, onRename, onDelete, onClose, dateLabel }) {
+  const [txt, setTxt] = useState("");
+  const [edit, setEdit] = useState(false);
+  return (
+    <div className="sheet-bg" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head">
+          <strong>NEM · {dateLabel}</strong>
+          <span>
+            <button className={"x wide-x" + (edit ? " active" : "")} onClick={() => setEdit(!edit)} title="Liste bearbeiten">✎</button>
+            <button className="x" onClick={onClose}>✕</button>
+          </span>
+        </div>
+        {edit && <p className="hint">Bearbeiten: ✎ = umbenennen, ✕ = aus Liste und allen Tagen löschen.</p>}
+        <div className="chipgrid">
+          {options.map((o) => (
+            edit ? (
+              <span key={o} className="pill editpill">
+                {o}
+                <button className="mini" onClick={() => onRename(o)}>✎</button>
+                <button className="mini del" onClick={() => onDelete(o)}>✕</button>
+              </span>
+            ) : (
+              <button key={o} className={"pill " + (selected.includes(o) ? "sel" : "")} onClick={() => onToggle(o)}>{o}</button>
+            )
+          ))}
+        </div>
+        <div className="addrow">
+          <input value={txt} placeholder="Neues NEM…" onChange={(e) => setTxt(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && txt.trim()) { onAdd(txt); setTxt(""); } }} />
+          <button className="btn" onClick={() => { if (txt.trim()) { onAdd(txt); setTxt(""); } }}>+ hinzufügen</button>
+        </div>
+        <button className="btn wide" onClick={onClose}>Fertig</button>
+      </div>
+    </div>
+  );
+}
+
+function NotizModal({ value, onChange, onClose, dateLabel }) {
+  return (
+    <div className="sheet-bg" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head"><strong>Notiz · {dateLabel}</strong><button className="x" onClick={onClose}>✕</button></div>
+        <textarea autoFocus value={value} onChange={(e) => onChange(e.target.value)} placeholder="Freie Notizen zum Tag…" />
+        <button className="btn wide" onClick={onClose}>Fertig</button>
+      </div>
+    </div>
+  );
+}
+
+function InputModal({ title, placeholder, submitLabel, initial, onSubmit, onClose }) {
+  const [txt, setTxt] = useState(initial || "");
+  const ok = () => { if (txt.trim()) onSubmit(txt.trim()); };
+  return (
+    <div className="sheet-bg" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head"><strong>{title}</strong><button className="x" onClick={onClose}>✕</button></div>
+        <input className="modalinput" autoFocus value={txt} placeholder={placeholder}
+          onChange={(e) => setTxt(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") ok(); }} />
+        <button className="btn primary wide" onClick={ok} disabled={!txt.trim()}>{submitLabel}</button>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmModal({ text, submitLabel, onConfirm, onClose }) {
+  return (
+    <div className="sheet-bg" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head"><strong>Bist du sicher?</strong><button className="x" onClick={onClose}>✕</button></div>
+        <p className="confirmtext">{text}</p>
+        <button className="btn wide danger" onClick={onConfirm}>{submitLabel}</button>
+        <button className="btn wide" onClick={onClose}>Abbrechen</button>
+      </div>
+    </div>
+  );
+}
+
+function RowEditModal({ label, onRename, onDelete, onClose }) {
+  return (
+    <div className="sheet-bg" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head"><strong>{label}</strong><button className="x" onClick={onClose}>✕</button></div>
+        <button className="btn wide" onClick={onRename}>Umbenennen</button>
+        <button className="btn wide danger" onClick={onDelete}>Kategorie löschen</button>
+      </div>
+    </div>
+  );
+}
+
+function ImportModal({ onImport, onClose }) {
+  const [txt, setTxt] = useState("");
+  const [res, setRes] = useState(null);
+  const onFile = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => setTxt(String(rd.result || ""));
+    rd.readAsText(f);
+  };
+  const go = () => { if (txt.trim()) setRes(onImport(txt)); };
+  return (
+    <div className="sheet-bg" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head"><strong>Daten importieren</strong><button className="x" onClick={onClose}>✕</button></div>
+        <p className="hint">CSV-Datei w\u00e4hlen oder den kopierten Text einf\u00fcgen. Format: ein Export dieser App.</p>
+        <input type="file" accept=".csv,text/csv,text/plain" onChange={onFile} className="fileinput" />
+        <textarea className="csvbox" placeholder="\u2026 oder CSV-Text hier einf\u00fcgen" value={txt} onChange={(e) => setTxt(e.target.value)} />
+        {res && <p className={res.ok ? "okmsg" : "errmsg"}>{res.msg}</p>}
+        {res && res.ok
+          ? <button className="btn primary wide" onClick={onClose}>Fertig</button>
+          : <button className="btn primary wide" onClick={go} disabled={!txt.trim()}>Importieren</button>}
+      </div>
+    </div>
+  );
+}
+
+function CsvModal({ csv, onClose }) {
+  const taRef = useRef(null);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(csv);
+      setCopied(true);
+    } catch (e) {
+      try {
+        if (taRef.current) {
+          taRef.current.select();
+          document.execCommand("copy");
+          setCopied(true);
+        }
+      } catch (_) {}
+    }
+    setTimeout(() => setCopied(false), 1600);
+  };
+  const dataUrl = "data:text/csv;charset=utf-8," + encodeURIComponent("\uFEFF" + csv);
+  return (
+    <div className="sheet-bg" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head"><strong>Daten exportieren</strong><button className="x" onClick={onClose}>✕</button></div>
+        <p className="hint">Text kopieren und z. B. in Google Sheets, Notizen oder eine .csv-Datei einfügen.</p>
+        <textarea ref={taRef} className="csvbox" readOnly value={csv} onFocus={(e) => e.target.select()} />
+        <button className="btn primary wide" onClick={copy}>{copied ? "Kopiert ✓" : "In Zwischenablage kopieren"}</button>
+        <a className="btn wide dl" href={dataUrl} download={`ernaehrungstagebuch_${iso(new Date())}.csv`}>Als Datei laden (falls unterstützt)</a>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisModal({ text, onClose }) {
+  return (
+    <div className="sheet-bg" onClick={onClose}>
+      <div className="sheet analysis" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head"><strong>Analyse</strong><button className="x" onClick={onClose}>✕</button></div>
+        <div className="analysis-body">{text}</div>
+        <button className="btn wide" onClick={onClose}>Schließen</button>
+      </div>
+    </div>
+  );
+}
+
+// ================= Analyse =================
+function analyze(entries, orderedDates, customRows, nemOptions) {
+  // Alle NEM, die irgendwo eingetragen wurden (auch bereits gelöschte Optionen)
+  const nemUsed = new Set(nemOptions);
+  orderedDates.forEach((d) => (entries[d].nem || []).forEach((x) => nemUsed.add(x)));
+  const inputCols = [
+    ...FOODS.map((f) => ({ id: f.id, label: f.label, kind: "check" })),
+    ...customRows.map((c) => ({ id: c.id, label: c.label, kind: "check" })),
+    ...[...nemUsed].map((n) => ({ id: n, label: "NEM: " + n, kind: "nem" })),
+  ];
+  const load = {}, hasData = {}, constip = {}, idx = {};
+  orderedDates.forEach((d, i) => (idx[d] = i));
+  orderedDates.forEach((d) => {
+    const e = entries[d] || {};
+    let sum = 0, has = false;
+    SEV_COLS.forEach((c) => { const n = sevVal(e[c.id]); if (n !== null) { sum += n; has = true; } });
+    load[d] = sum; hasData[d] = has; constip[d] = e.verstopfung === false;
+  });
+  const dataDays = orderedDates.filter((d) => hasData[d]);
+  if (dataDays.length < 5) {
+    return `Noch zu wenig Daten für eine Auswertung.\n\nBisher ${dataDays.length} Tag(e) mit erfassten Symptomen. Trage am besten mindestens 7–10 Tage durchgehend Symptome und Lebensmittel ein, dann werden mögliche Muster sichtbar.`;
+  }
+  const results = [], tooOften = [], notUsed = [];
+  inputCols.forEach((col) => {
+    const consumed = new Set();
+    orderedDates.forEach((d) => {
+      if (col.kind === "nem") {
+        if ((entries[d].nem || []).includes(col.id)) consumed.add(d);
+      } else if (entries[d][col.id] === true) consumed.add(d);
+    });
+    if (consumed.size === 0) { notUsed.push(col.label); return; }
+    let expSum = 0, expN = 0, unSum = 0, unN = 0, expC = 0, unC = 0;
+    dataDays.forEach((d) => {
+      const i = idx[d];
+      let exposed = false;
+      for (let k = 0; k <= 3; k++) { const pd = orderedDates[i - k]; if (pd && consumed.has(pd)) { exposed = true; break; } }
+      if (exposed) { expSum += load[d]; expN++; if (constip[d]) expC++; }
+      else { unSum += load[d]; unN++; if (constip[d]) unC++; }
+    });
+    if (expN < 2 || unN < 2) { if (expN >= 2 && unN < 2) tooOften.push(col.label); return; }
+    const me = expSum / expN, mu = unSum / unN;
+    results.push({ label: col.label, diff: me - mu, me, mu, constDiff: expC / expN - unC / unN });
+  });
+  results.sort((a, b) => b.diff - a.diff);
+  const suspects = results.filter((r) => r.diff > 0.5);
+  const calm = results.filter((r) => r.diff < -0.5);
+  let out = `Auswertung über ${dataDays.length} Tage mit Symptomdaten.\nBerücksichtigt wird ein Nachwirken von bis zu 72 Stunden (Stillzeit).\n\n`;
+  out += "MÖGLICHE AUSLÖSER (höhere Symptomlast in den 3 Tagen nach Verzehr/Einnahme – Lebensmittel und jedes NEM einzeln geprüft):\n";
+  if (suspects.length === 0) out += "Kein Lebensmittel zeigt aktuell einen deutlichen Zusammenhang.\n";
+  else suspects.slice(0, 5).forEach((r) => {
+    const c = r.constDiff > 0.25 ? " · auch seltener Stuhlgang" : "";
+    out += `• ${r.label}: Ø ${r.me.toFixed(1)} statt ${r.mu.toFixed(1)} Symptompunkte${c}\n`;
+  });
+  if (calm.length) {
+    out += "\nEHER UNVERDÄCHTIG (Symptome tendenziell geringer):\n";
+    calm.slice(0, 4).forEach((r) => { out += `• ${r.label}: Ø ${r.me.toFixed(1)} statt ${r.mu.toFixed(1)}\n`; });
+  }
+  if (tooOften.length) out += `\nNICHT BEURTEILBAR (fast täglich gegessen – es fehlen Vergleichstage ohne):\n${tooOften.join(", ")}\n`;
+  if (notUsed.length) out += `\nNie erfasst: ${notUsed.join(", ")}\n`;
+  if (suspects.length) out += `\nNÄCHSTER SCHRITT: Am aussagekräftigsten ist ein Auslassversuch. Lass „${suspects[0].label}" ein paar Tage konsequent weg und beobachte, ob die Symptome zurückgehen.`;
+  out += "\n\nHinweis: Das sind statistische Muster, keine Beweise. Bei wenigen Tagen oder Lebensmitteln, die immer zusammen gegessen werden, können Scheinzusammenhänge entstehen. Anhaltende Beschwerden, Blut oder Schleim im Stuhl bitte kinderärztlich abklären.";
+  return out;
+}
+
+// ================= Styles =================
+function Style() {
+  return (
+    <style>{`
+      * { box-sizing: border-box; }
+      .wrap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #202b2e; background: #FBFAF7; min-height: 100vh; padding: 12px; -webkit-text-size-adjust: 100%; }
+      .loading { padding: 40px; text-align: center; color: #6b7472; }
+      .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+      h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+      .sub { margin: 2px 0 0; font-size: 12px; color: #6b7472; }
+      .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+      .btn { border: 1px solid #d8d4ca; background: #fff; color: #202b2e; padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+      .btn:active { transform: translateY(1px); }
+      .btn.primary { background: #24343a; color: #fff; border-color: #24343a; }
+      .btn.wide { width: 100%; margin-top: 12px; padding: 12px; }
+
+      .legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 2px 10px; font-size: 11px; }
+      .lg { padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+      .lg-kein { background: #cfe9d6; color: #14663a; }
+      .lg-bisschen { background: #cfe0fb; color: #1e40af; }
+      .lg-mittel { background: #f7e3a8; color: #8a5a06; }
+      .lg-viel { background: #f6c9c9; color: #9a1414; }
+      .lg-sep { width: 1px; height: 14px; background: #ddd8ce; }
+      .lg-note { color: #6b7472; }
+
+      .scroll { overflow-x: auto; border: 1px solid #e6e2d9; border-radius: 10px; background: #fff; -webkit-overflow-scrolling: touch; }
+      table { border-collapse: separate; border-spacing: 0; }
+
+      thead .dayhead { position: sticky; top: 0; z-index: 3; background: #f3f1ea; color: #4a5457; padding: 6px 0 5px; border-bottom: 1px solid #e0dccf; border-right: 1px solid #ece9df; text-align: center; min-width: 30px; width: 30px; vertical-align: bottom; }
+      .dayhead.today { background: #eef3ee; }
+      .dhv { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; display: inline-block; line-height: 1; }
+      .dwd { font-size: 10px; font-weight: 700; color: #9aa3a1; }
+      .dayhead.today .dwd { color: #2f7a52; }
+      .ddt { font-size: 11px; font-weight: 700; margin-top: 3px; }
+
+      .corner { position: sticky; left: 0; top: 0; z-index: 5; background: #f3f1ea; border-bottom: 1px solid #e0dccf; border-right: 1px solid #e0dccf; min-width: 92px; width: 92px; }
+
+      .sticky-l { position: sticky; left: 0; }
+      .rowlabel { z-index: 2; background: #fff; text-align: left; white-space: nowrap; padding: 0 10px; font-size: 12px; font-weight: 600; min-width: 92px; width: 92px; height: 30px; border-right: 1px solid #e6e2d9; border-bottom: 1px solid #f0ede4; }
+      tr.sepBelow .rowlabel, tr.sepBelow .dc { border-bottom: 2px solid #d3cec2; }
+
+      .dc { width: 30px; min-width: 30px; height: 30px; padding: 0; background: #fff; border-right: 1px solid #f2efe7; border-bottom: 1px solid #f0ede4; }
+
+      .cell { width: 100%; height: 100%; border: none; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; cursor: pointer; -webkit-tap-highlight-color: transparent; color: #333; }
+      .cell.yes { background: #fff; color: #1a1a1a; }
+      .cell.no { background: #fff; color: #c4c9c5; }
+      .cell.empty { background: #fff; color: transparent; }
+      .ph { color: #c4c9c5; font-size: 14px; font-weight: 400; }
+      .badge { background: #ece7f5; color: #4b3b78; border-radius: 9px; min-width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; padding: 0 4px; }
+      .notemark { color: #4a5457; font-size: 13px; }
+
+      .sevwrap { position: relative; width: 100%; height: 100%; }
+      .sevwrap.sev-none { background: #fff; }
+      .sevwrap.sev-kein { background: #cfe9d6; }
+      .sevwrap.sev-bisschen { background: #cfe0fb; }
+      .sevwrap.sev-mittel { background: #f7e3a8; }
+      .sevwrap.sev-viel { background: #f6c9c9; }
+      .sevsel { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: none; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+
+      .sheet-bg { position: fixed; inset: 0; background: rgba(20,26,28,.4); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+      .sheet { background: #fff; width: 100%; max-width: 460px; border-radius: 16px 16px 0 0; padding: 16px; box-shadow: 0 -8px 30px rgba(0,0,0,.15); animation: up .18s ease; }
+      @keyframes up { from { transform: translateY(20px); opacity: .6 } to { transform: none; opacity: 1 } }
+      .sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 15px; }
+      .x { border: none; background: #f0ede4; width: 30px; height: 30px; border-radius: 50%; font-size: 14px; cursor: pointer; color: #4a5457; }
+      .chipgrid { display: flex; flex-wrap: wrap; gap: 8px; }
+      .pill { border: 1px solid #d8d4ca; background: #fff; padding: 8px 12px; border-radius: 20px; font-size: 13px; cursor: pointer; font-weight: 600; color: #3a4447; }
+      .pill.sel { background: #ece7f5; border-color: #b9a9e0; color: #4b3b78; }
+      .addrow { display: flex; gap: 6px; margin-top: 14px; }
+      .addrow input { flex: 1; border: 1px solid #d8d4ca; border-radius: 8px; padding: 10px; font-size: 14px; }
+      textarea { width: 100%; min-height: 120px; border: 1px solid #d8d4ca; border-radius: 8px; padding: 10px; font-size: 14px; font-family: inherit; resize: vertical; }
+      .analysis { max-width: 520px; }
+      .analysis-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.5; color: #2b3538; max-height: 60vh; overflow-y: auto; }
+      .hint { font-size: 12.5px; color: #6b7472; margin: 0 0 10px; }
+      .csvbox { width: 100%; height: 150px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: pre; }
+      .dl { display: block; text-align: center; text-decoration: none; margin-top: 8px; }
+      .rowedit { border: none; background: transparent; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; }
+      .editicon { color: #b0b6b3; font-size: 10px; }
+      .btn.danger { color: #9a1414; border-color: #e6b8b8; margin-top: 8px; }
+      .wide-x { margin-right: 6px; }
+      .x.active { background: #ece7f5; color: #4b3b78; }
+      .editpill { display: inline-flex; align-items: center; gap: 5px; }
+      .mini { border: none; background: #f0ede4; border-radius: 50%; width: 20px; height: 20px; font-size: 10px; cursor: pointer; color: #4a5457; padding: 0; }
+      .mini.del { color: #9a1414; }
+      .modalinput { width: 100%; border: 1px solid #d8d4ca; border-radius: 8px; padding: 12px; font-size: 15px; }
+      .confirmtext { font-size: 14px; color: #3a4447; margin: 0 0 4px; line-height: 1.45; }
+      .btn:disabled { opacity: .45; cursor: default; }
+      .fileinput { display: block; width: 100%; font-size: 13px; margin-bottom: 10px; }
+      .okmsg { color: #14663a; font-size: 13px; margin: 10px 0 4px; }
+      .errmsg { color: #9a1414; font-size: 13px; margin: 10px 0 4px; }
+    `}</style>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
 ];
 
 const FOODS = [
