@@ -496,8 +496,17 @@ function App() {
         ...customRows.filter((r) => r.type !== "sev").map((r) => ({ ...r, type: "check", custom: true })),
     ];
     // ----- Zellen-Rendering -----
+    const lastDay = daysAsc[daysAsc.length - 1];
     function dayCls(d) {
-        return (d === selectedDate ? " selcol" : "") + (d === today ? " today" : "") + (isWeekend(d) ? " we" : "");
+        return (d === selectedDate ? " selcol" : "") + (d === today ? " today" : "") + (isWeekend(d) ? " we" : "") + (d === lastDay ? " lastc" : "");
+    }
+    function fillerCells() {
+        return daysAsc.map((d) => h("td", { key: d, className: "dc fc" + dayCls(d), onClick: () => selectDay(d) }));
+    }
+    function gapRow(key) {
+        return h("tr", { key, className: "gap" },
+            h("td", { className: "sticky-l gaplabel" }),
+            daysAsc.map((d) => h("td", { key: d, className: "dc" + dayCls(d) })));
     }
     function sevCell(d, row) {
         const e = entries[d];
@@ -554,22 +563,22 @@ function App() {
     function sectionRow(key, label, sec) {
         return h("tr", { key, className: "secrow sec-" + sec },
             h("td", { className: "seclabel sticky-l" }, label),
-            h("td", { colSpan: daysAsc.length, className: "secfill" }));
+            fillerCells());
     }
     function addRowTr(key, label, modalCfg, sec) {
-        return h("tr", { key, className: "addtr sec-" + sec },
+        return h("tr", { key, className: "addtr seclast sec-" + sec },
             h("td", { className: "rowlabel sticky-l addcell" },
                 h("button", { className: "addbtn", onClick: () => setModal(modalCfg) }, label)),
-            h("td", { colSpan: daysAsc.length, className: "addspace" }));
+            fillerCells());
     }
     // ----- NEM-Gruppe -----
-    const nemHead = h("tr", { key: "nemhead", className: "secrow sec-nem" },
+    const nemHead = h("tr", { key: "nemhead", className: "secrow sec-nem" + (nemOpen ? "" : " seclast") },
         h("td", { className: "seclabel sticky-l" },
             h("button", { className: "nemtoggle", onClick: () => setNemOpen(!nemOpen) },
                 h("span", { className: "chev" + (nemOpen ? " open" : "") }, "▸"),
                 " NEM")),
         nemOpen
-            ? h("td", { colSpan: daysAsc.length, className: "secfill" })
+            ? fillerCells()
             : daysAsc.map((d) => {
                 const n = (entries[d].nem || []).length;
                 const active = d === selectedDate;
@@ -627,13 +636,16 @@ function App() {
                         sectionRow("sec-sym", "Symptome", "sym"),
                         symptomRows.map((r) => dataRow(r, "sym", "Symptom")),
                         addRowTr("add-sym", "+ Symptom", { type: "input", title: "Neues Symptom", placeholder: "z. B. Bauchweh", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "sev" } }, "sym"),
+                        gapRow("gap-1"),
                         sectionRow("sec-trig", "Ernährung & Auslöser", "trig"),
                         triggerRows.map((r) => dataRow(r, "trig", "Auslöser")),
                         addRowTr("add-trig", "+ Auslöser", { type: "input", title: "Neuer Auslöser", placeholder: "z. B. Weizen", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "check" } }, "trig"),
+                        gapRow("gap-2"),
                         nemHead,
                         nemRows,
+                        gapRow("gap-3"),
                         sectionRow("sec-note", "Notizen", "note"),
-                        h("tr", { key: "notiz", className: "sec-note" },
+                        h("tr", { key: "notiz", className: "sec-note seclast" },
                             h("td", { className: "rowlabel sticky-l" }, "Notiz"),
                             daysAsc.map((d) => notizCell(d))))))),
         modal?.type === "menu" && h(MenuModal, {
@@ -896,11 +908,11 @@ function Style() {
       :root {
         --accent: #6d28d9; --accent-2: #0ea5e9; --accent-soft: #ede9fe;
         --ink: #1e293b; --mut: #64748b; --line: #e2e8f0; --card: #ffffff;
-        --sym: #be123c; --sym-soft: #fff1f2;
+        --sym: #ea580c; --sym-soft: #fff7ed;
         --trig: #0369a1; --trig-soft: #f0f9ff;
         --nem: #7c3aed; --nem-soft: #f5f3ff;
-        --note: #b45309; --note-soft: #fffbeb;
-        --sev-kein: #4ade80; --sev-bisschen: #fde047; --sev-mittel: #fb923c; --sev-viel: #ef4444;
+        --note: #db2777; --note-soft: #fdf2f8;
+        --sev-kein: #4ade80; --sev-bisschen: #a3e635; --sev-mittel: #fb923c; --sev-viel: #ef4444;
         --colw: 32px; --colw-sel: 46px; --labelw: 108px; --rowh: 36px;
       }
       * { box-sizing: border-box; }
@@ -932,7 +944,7 @@ function Style() {
       .legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 2px 8px; font-size: 11px; }
       .lg { padding: 2px 9px; border-radius: 20px; font-weight: 700; }
       .lg-kein { background: var(--sev-kein); color: #14532d; }
-      .lg-bisschen { background: var(--sev-bisschen); color: #713f12; }
+      .lg-bisschen { background: var(--sev-bisschen); color: #3f6212; }
       .lg-mittel { background: var(--sev-mittel); color: #7c2d12; }
       .lg-viel { background: var(--sev-viel); color: #fff; }
 
@@ -964,28 +976,31 @@ function Style() {
 
       .sticky-l { position: sticky; left: 0; }
       .rowlabel { z-index: 2; background: var(--card); text-align: left; white-space: nowrap; padding: 0 10px; font-size: 12px; font-weight: 600; min-width: var(--labelw); width: var(--labelw); height: var(--rowh); border-right: 1px solid var(--line); border-bottom: 1px solid #f1f5f9; }
-      .sec-sym .rowlabel { box-shadow: inset 3px 0 0 var(--sym); }
-      .sec-trig .rowlabel { box-shadow: inset 3px 0 0 var(--trig); }
-      .sec-nem .rowlabel { box-shadow: inset 3px 0 0 var(--nem); }
-      .sec-note .rowlabel { box-shadow: inset 3px 0 0 var(--note); }
       .nemlabel { padding-left: 18px; font-weight: 500; }
 
-      .seclabel { position: sticky; left: 0; z-index: 2; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 5px 10px; border-right: 1px solid var(--line); border-bottom: 1px solid #f1f5f9; min-width: var(--labelw); width: var(--labelw); white-space: nowrap; }
-      .secrow.sec-sym .seclabel, .secrow.sec-sym .secfill { background: var(--sym-soft); color: var(--sym); }
-      .secrow.sec-trig .seclabel, .secrow.sec-trig .secfill { background: var(--trig-soft); color: var(--trig); }
-      .secrow.sec-nem .seclabel { background: var(--nem-soft); color: var(--nem); }
-      .secrow.sec-nem .secfill { background: var(--nem-soft); }
-      .secrow.sec-note .seclabel, .secrow.sec-note .secfill { background: var(--note-soft); color: var(--note); }
-      .secfill { border-bottom: 1px solid #f1f5f9; }
-      .nembadgecell { background: var(--nem-soft); }
+      /* Durchgehende bunte Rahmen um jeden Block */
+      tr.sec-sym { --sc: var(--sym); --sc-soft: var(--sym-soft); }
+      tr.sec-trig { --sc: var(--trig); --sc-soft: var(--trig-soft); }
+      tr.sec-nem { --sc: var(--nem); --sc-soft: var(--nem-soft); }
+      tr.sec-note { --sc: var(--note); --sc-soft: var(--note-soft); }
+      tbody tr[class*="sec-"] > td:first-child { border-left: 2px solid var(--sc, transparent); }
+      tbody tr[class*="sec-"] > td.lastc { border-right: 2px solid var(--sc, transparent); }
+      tbody tr.secrow > td { border-top: 2px solid var(--sc, transparent); }
+      tbody tr.seclast > td { border-bottom: 2px solid var(--sc, transparent); }
+
+      .seclabel { position: sticky; left: 0; z-index: 2; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 5px 10px; border-right: 1px solid var(--line); border-bottom: 1px solid #f1f5f9; min-width: var(--labelw); width: var(--labelw); white-space: nowrap; background: var(--sc-soft); color: var(--sc); }
+      tr.secrow td.dc { background: var(--sc-soft); }
+      tr.gap td { height: 8px; padding: 0; border: none; background: var(--card); }
+      tr.gap td.dc { height: 8px; background: var(--card); border: none; }
+      .gaplabel { z-index: 2; background: var(--card); min-width: var(--labelw); width: var(--labelw); }
       .nemtoggle { border: none; background: transparent; font: inherit; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--nem); cursor: pointer; padding: 0; display: inline-flex; align-items: center; gap: 5px; }
       .chev { display: inline-block; transition: transform .15s ease; font-size: 11px; }
       .chev.open { transform: rotate(90deg); }
 
       .addcell { border-bottom: 1px solid #f1f5f9; }
-      .addspace { border-bottom: 1px solid #f1f5f9; background: #fcfcfd; }
+      tr.addtr td.dc { background: #fcfcfd; }
       .addbtn { border: 1.5px dashed #cbd5e1; background: transparent; color: var(--mut); font-size: 12px; font-weight: 700; border-radius: 16px; padding: 4px 10px; cursor: pointer; }
-      .sec-sym .addbtn { color: var(--sym); border-color: #fecdd3; }
+      .sec-sym .addbtn { color: var(--sym); border-color: #fed7aa; }
       .sec-trig .addbtn { color: var(--trig); border-color: #bae6fd; }
       .sec-nem .addbtn { color: var(--nem); border-color: #ddd6fe; }
 
