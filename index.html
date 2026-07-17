@@ -3,15 +3,16 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#141b2b" />
 <title>Ernährungstagebuch</title>
-<style> html, body, #root { height: 100%; } body { margin: 0; } </style>
+<style> html, body, #root { height: 100%; } body { margin: 0; background: #141b2b; } </style>
 <script>
   function showError(msg) {
     var el = document.getElementById("root");
     if (!el) return;
-    el.innerHTML = '<div style="font-family:-apple-system,sans-serif;padding:20px;color:#9a1414;white-space:pre-wrap;line-height:1.5;font-size:14px;">' +
+    el.innerHTML = '<div style="font-family:-apple-system,sans-serif;padding:20px;color:#ff9d9d;white-space:pre-wrap;line-height:1.5;font-size:14px;">' +
       '<strong>Fehler beim Laden</strong><br><br>' + msg +
-      '<br><br><span style="color:#6b7472;">Bitte Screenshot davon schicken.</span></div>';
+      '<br><br><span style="color:#8b96ab;">Bitte Screenshot davon schicken.</span></div>';
   }
   window.addEventListener("error", function (e) {
     if (e && e.target && e.target.tagName === "SCRIPT") {
@@ -28,7 +29,7 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 </head>
 <body>
-<div id="root"><div style="font-family:-apple-system,sans-serif;padding:24px;color:#6b7472;">Lädt Ernährungstagebuch …</div></div>
+<div id="root"><div style="font-family:-apple-system,sans-serif;padding:24px;color:#8b96ab;">Lädt Ernährungstagebuch …</div></div>
 <script>
   setTimeout(function () {
     var el = document.getElementById("root");
@@ -89,9 +90,9 @@ const fmtShort = (s) => {
     return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.`;
 };
 const fmtDay = (s) => `${WEEKDAYS[parseISO(s).getDay()]} ${fmtShort(s)}`;
-const isWeekend = (s) => {
-    const wd = parseISO(s).getDay();
-    return wd === 0 || wd === 6;
+const addDays = (s, n) => {
+    const d = parseISO(s);
+    return iso(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
 };
 function buildRange(minISO, maxISO) {
     const out = [];
@@ -176,19 +177,34 @@ function saveState(state) {
     }
     catch (e) { }
 }
+// ---------- Icons (Inline-SVG) ----------
+function svg(cls, ...children) {
+    return h("svg", { className: cls, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true }, ...children);
+}
+const ICONS = {
+    sun: (cls) => svg(cls, h("circle", { cx: 12, cy: 12, r: 4 }), h("path", { d: "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" })),
+    chart: (cls) => svg(cls, h("path", { d: "M4 20V12" }), h("path", { d: "M10 20V5" }), h("path", { d: "M16 20v-6" }), h("path", { d: "M22 20H2" })),
+    bulb: (cls) => svg(cls, h("path", { d: "M9.5 18h5" }), h("path", { d: "M10.5 21h3" }), h("path", { d: "M12 3a6 6 0 0 0-3.9 10.6c.6.5 1.4 1.3 1.4 2.4h5c0-1.1.8-1.9 1.4-2.4A6 6 0 0 0 12 3z" })),
+    gear: (cls) => svg(cls, h("circle", { cx: 12, cy: 12, r: 3.2 }), h("path", { d: "M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" })),
+    pulse: (cls) => svg(cls, h("polyline", { points: "2 12 7 12 10 5 14 19 17 12 22 12" })),
+    apple: (cls) => svg(cls, h("path", { d: "M12 7c-3.2-2.8-8-.8-8 4 0 4.6 3.8 9 8 9s8-4.4 8-9c0-4.8-4.8-6.8-8-4z" }), h("path", { d: "M12 7c0-2.2 1.2-3.5 3-4" })),
+    pill: (cls) => svg(cls, h("rect", { x: 3, y: 8.5, width: 18, height: 7, rx: 3.5 }), h("path", { d: "M12 8.5v7" })),
+    pencil: (cls) => svg(cls, h("path", { d: "M17 3l4 4L8 20l-5 1 1-5L17 3z" })),
+    left: (cls) => svg(cls, h("polyline", { points: "14 5 7 12 14 19" })),
+    right: (cls) => svg(cls, h("polyline", { points: "10 5 17 12 10 19" })),
+};
 // ================= App =================
 function App() {
     const [entries, setEntries] = useState({});
     const [customRows, setCustomRows] = useState([]);
     const [nemOptions, setNemOptions] = useState(DEFAULT_NEM);
     const [loaded, setLoaded] = useState(false);
-    const [modal, setModal] = useState(null);
-    const [analysis, setAnalysis] = useState(null);
+    const [view, setView] = useState("day");
     const [selectedDate, setSelectedDate] = useState(iso(new Date()));
-    const [nemOpen, setNemOpen] = useState(false);
-    const [showEarlier, setShowEarlier] = useState(false);
+    const [modal, setModal] = useState(null);
+    const [editCard, setEditCard] = useState(null); // "sym" | "trig" | "nem" | null
     const firstSave = useRef(true);
-    const scrollRef = useRef(null);
+    const weekScrollRef = useRef(null);
     useEffect(() => {
         const r = document.getElementById("root");
         if (r)
@@ -223,25 +239,21 @@ function App() {
         }
         saveState({ entries, customRows, nemOptions });
     }, [entries, customRows, nemOptions, loaded]);
+    // Datums-Chip der Auswahl sichtbar halten
     useEffect(() => {
-        if (loaded && scrollRef.current) {
-            scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
-        }
-    }, [loaded]);
-    // "+ 7 Tage"-Sprechblase nur zeigen, wenn ganz nach links gescrollt
+        if (!loaded || view !== "day")
+            return;
+        const el = document.getElementById("chip-" + selectedDate);
+        if (el && el.scrollIntoView)
+            el.scrollIntoView({ inline: "center", block: "nearest" });
+    }, [selectedDate, view, loaded]);
+    // Verlauf: rechts (heute) starten
     useEffect(() => {
-        if (!loaded)
-            return;
-        const el = scrollRef.current;
-        if (!el)
-            return;
-        const onScroll = () => setShowEarlier(el.scrollLeft < 6);
-        onScroll();
-        el.addEventListener("scroll", onScroll, { passive: true });
-        return () => el.removeEventListener("scroll", onScroll);
-    }, [loaded]);
+        if (loaded && view === "week" && weekScrollRef.current)
+            weekScrollRef.current.scrollLeft = weekScrollRef.current.scrollWidth;
+    }, [view, loaded]);
     const dates = Object.keys(entries).sort();
-    const daysAsc = [...dates]; // aufsteigend: links Vergangenheit, rechts heute
+    const today = iso(new Date());
     function emptyDay() {
         const d = { verstopfung: null, notiz: "", nem: [] };
         SEV_COLS.forEach((c) => (d[c.id] = ""));
@@ -258,13 +270,17 @@ function App() {
             return { ...p, [date]: { ...p[date], [id]: next } };
         });
     }
-    function selectDay(d) {
-        setSelectedDate(d);
-        requestAnimationFrame(() => {
-            const el = document.getElementById("day-" + d);
-            if (el && el.scrollIntoView)
-                el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    function toggleNem(date, item) {
+        setEntries((p) => {
+            const cur = p[date].nem || [];
+            const nem = cur.includes(item) ? cur.filter((x) => x !== item) : [...cur, item];
+            return { ...p, [date]: { ...p[date], nem } };
         });
+    }
+    function gotoDate(d) {
+        setEntries((p) => (p[d] ? p : { ...p, [d]: emptyDay() }));
+        setSelectedDate(d);
+        setView("day");
     }
     function applyAddRow(name, rowType) {
         setCustomRows((p) => [...p, { id: "c_" + Date.now(), label: name, type: rowType === "sev" ? "sev" : "check" }]);
@@ -308,6 +324,12 @@ function App() {
             return next;
         });
     }
+    function addNemOption(name) {
+        const n = name.trim();
+        if (!n || nemOptions.includes(n))
+            return;
+        setNemOptions((p) => [...p, n]);
+    }
     function runModalAction(action, value) {
         if (action.kind === "addrow")
             applyAddRow(value, action.rowType);
@@ -322,33 +344,6 @@ function App() {
         if (action.kind === "delnem")
             applyDeleteNem(action.name);
         setModal(null);
-    }
-    function addEarlierDays() {
-        setEntries((p) => {
-            const keys = Object.keys(p).sort();
-            const start = parseISO(keys[0]);
-            const next = { ...p };
-            for (let i = 1; i <= 7; i++) {
-                const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() - i);
-                next[iso(d)] = emptyDay();
-            }
-            return next;
-        });
-        if (scrollRef.current)
-            scrollRef.current.scrollLeft = 0;
-    }
-    function toggleNem(date, item) {
-        setEntries((p) => {
-            const cur = p[date].nem || [];
-            const nem = cur.includes(item) ? cur.filter((x) => x !== item) : [...cur, item];
-            return { ...p, [date]: { ...p[date], nem } };
-        });
-    }
-    function addNemOption(name) {
-        const n = name.trim();
-        if (!n || nemOptions.includes(n))
-            return;
-        setNemOptions((p) => [...p, n]);
     }
     function exportCSV() {
         const cols = [
@@ -382,9 +377,6 @@ function App() {
         });
         const csv = [head, ...rows].join("\n");
         setModal({ type: "csv", csv });
-    }
-    function runAnalysis() {
-        setAnalysis(analyze(entries, dates, customRows, nemOptions));
     }
     function importCSV(text) {
         let rows;
@@ -474,9 +466,9 @@ function App() {
         setEntries((prev) => {
             const merged = { ...prev, ...imported };
             const keys = Object.keys(merged).sort();
-            const today = iso(new Date());
+            const today2 = iso(new Date());
             const last = keys[keys.length - 1];
-            const range = buildRange(keys[0], today > last ? today : last);
+            const range = buildRange(keys[0], today2 > last ? today2 : last);
             range.forEach((d) => { if (!merged[d])
                 merged[d] = emptyDay(); });
             return merged;
@@ -485,175 +477,216 @@ function App() {
     }
     if (!loaded)
         return h("div", { className: "loading" }, "Lädt…");
-    const today = iso(new Date());
-    const symptomRows = [
-        ...SEV_COLS.map((c) => ({ ...c, type: "sev" })),
-        { id: "verstopfung", label: "Kaki", type: "check" },
-        ...customRows.filter((r) => r.type === "sev").map((r) => ({ ...r, custom: true })),
-    ];
-    const triggerRows = [
-        ...FOODS.map((f) => ({ ...f, type: "check" })),
-        ...customRows.filter((r) => r.type !== "sev").map((r) => ({ ...r, type: "check", custom: true })),
-    ];
-    // ----- Zellen-Rendering -----
-    const lastDay = daysAsc[daysAsc.length - 1];
-    function dayCls(d) {
-        return (d === selectedDate ? " selcol" : "") + (d === today ? " today" : "") + (isWeekend(d) ? " we" : "") + (d === lastDay ? " lastc" : "");
+    const e = entries[selectedDate] || emptyDay();
+    const symRows = [...SEV_COLS.map((c) => ({ ...c, type: "sev" })), ...customRows.filter((r) => r.type === "sev").map((r) => ({ ...r, custom: true }))];
+    const trigRows = [...FOODS.map((f) => ({ ...f, type: "check" })), ...customRows.filter((r) => r.type !== "sev").map((r) => ({ ...r, type: "check", custom: true }))];
+    // ---------- Tages-Ansicht ----------
+    function editTap(row, noun) {
+        setModal({ type: "rowedit", rowId: row.id, noun });
     }
-    function fillerCells() {
-        return daysAsc.map((d) => h("td", { key: d, className: "dc fc" + dayCls(d), onClick: () => selectDay(d) }));
-    }
-    function gapRow(key) {
-        return h("tr", { key, className: "gap" },
-            h("td", { className: "sticky-l gaplabel" }),
-            daysAsc.map((d) => h("td", { key: d, className: "dc" + dayCls(d) })));
-    }
-    function sevCell(d, row) {
-        const e = entries[d];
-        const v = e[row.id] || "";
-        const chip = h("div", { className: "sevchip sev-" + (v || "none") });
-        if (d !== selectedDate)
-            return h("td", { key: d, className: "dc ro" + dayCls(d), onClick: () => selectDay(d) }, chip);
-        return h("td", { key: d, className: "dc" + dayCls(d) },
-            h("div", { className: "sevwrap" },
-                chip,
-                h("select", { className: "sevsel", value: v, onChange: (ev) => update(d, row.id, ev.target.value) }, SEV_OPTIONS.map((o) => h("option", { key: o.v, value: o.v }, o.label)))));
-    }
-    function checkMark(v) {
-        if (v === true)
-            return h("span", { className: "mk yes" }, "✓");
-        if (v === false)
-            return h("span", { className: "mk no" }, "–");
-        return null;
-    }
-    function checkCell(d, row) {
-        const v = entries[d][row.id];
-        if (d !== selectedDate)
-            return h("td", { key: d, className: "dc ro" + dayCls(d), onClick: () => selectDay(d) }, checkMark(v));
-        return h("td", { key: d, className: "dc" + dayCls(d) },
-            h("button", { className: "cellbtn", onClick: () => cycle(d, row.id) }, checkMark(v)));
-    }
-    function nemOptCell(d, opt) {
-        const on = (entries[d].nem || []).includes(opt);
-        const mark = on ? h("span", { className: "mk yes" }, "✓") : null;
-        if (d !== selectedDate)
-            return h("td", { key: d, className: "dc ro" + dayCls(d), onClick: () => selectDay(d) }, mark);
-        return h("td", { key: d, className: "dc" + dayCls(d) },
-            h("button", { className: "cellbtn", onClick: () => toggleNem(d, opt) }, mark));
-    }
-    function notizCell(d) {
-        const has = !!entries[d].notiz;
-        const mark = has ? h("span", { className: "notemark" }, "✎") : null;
-        if (d !== selectedDate)
-            return h("td", { key: d, className: "dc ro" + dayCls(d), onClick: () => selectDay(d) }, mark);
-        return h("td", { key: d, className: "dc" + dayCls(d) },
-            h("button", { className: "cellbtn", onClick: () => setModal({ type: "notiz", date: d }) }, mark || h("span", { className: "ph" }, "+")));
-    }
-    function labelCell(row, kind) {
-        if (row.custom)
-            return h("button", { className: "rowedit", onClick: () => setModal({ type: "rowedit", rowId: row.id, noun: kind }) },
-                row.label, " ", h("span", { className: "editicon" }, "✎"));
-        return row.label;
-    }
-    function dataRow(row, sec, kind) {
-        return h("tr", { key: row.id, className: "sec-" + sec },
-            h("td", { className: "rowlabel sticky-l" }, labelCell(row, kind)),
-            daysAsc.map((d) => (row.type === "sev" ? sevCell(d, row) : checkCell(d, row))));
-    }
-    function sectionRow(key, label, sec) {
-        return h("tr", { key, className: "secrow sec-" + sec },
-            h("td", { className: "seclabel sticky-l" }, label),
-            fillerCells());
-    }
-    function addRowTr(key, label, modalCfg, sec) {
-        return h("tr", { key, className: "addtr seclast sec-" + sec },
-            h("td", { className: "rowlabel sticky-l addcell" },
-                h("button", { className: "addbtn", onClick: () => setModal(modalCfg) }, label)),
-            fillerCells());
-    }
-    // ----- NEM-Gruppe -----
-    const nemHead = h("tr", { key: "nemhead", className: "secrow sec-nem" + (nemOpen ? "" : " seclast") },
-        h("td", { className: "seclabel sticky-l" },
-            h("button", { className: "nemtoggle", onClick: () => setNemOpen(!nemOpen) },
-                h("span", { className: "chev" + (nemOpen ? " open" : "") }, "▸"),
-                " NEM")),
-        nemOpen
-            ? fillerCells()
-            : daysAsc.map((d) => {
-                const n = (entries[d].nem || []).length;
-                const active = d === selectedDate;
-                return h("td", {
+    function dayView() {
+        const isToday = selectedDate === today;
+        return h("div", { className: "page" },
+            h("div", { className: "datebar" },
+                h("button", { className: "arrowbtn", "aria-label": "Vortag", onClick: () => gotoDate(addDays(selectedDate, -1)) }, ICONS.left("nico")),
+                h("div", { className: "dchips", id: "dchips" }, dates.map((d) => h("button", {
                     key: d,
-                    className: "dc ro nembadgecell" + dayCls(d),
-                    onClick: () => (active ? setNemOpen(true) : selectDay(d)),
-                }, n ? h("span", { className: "badge" }, n) : null);
-            }));
-    const nemRows = nemOpen ? [
-        ...nemOptions.map((opt) => h("tr", { key: "nem_" + opt, className: "sec-nem nemrow" },
-            h("td", { className: "rowlabel sticky-l nemlabel" },
-                h("button", { className: "rowedit", onClick: () => setModal({ type: "rowedit", nemName: opt, noun: "NEM" }) },
-                    opt, " ", h("span", { className: "editicon" }, "✎"))),
-            daysAsc.map((d) => nemOptCell(d, opt)))),
-        addRowTr("add-nem", "+ NEM", { type: "input", title: "Neues NEM", placeholder: "z. B. Omega 3", submitLabel: "Hinzufügen", initial: "", action: { kind: "addnem" } }, "nem"),
-    ] : [];
-    return h("div", { className: "wrap" },
+                    id: "chip-" + d,
+                    className: "dchip" + (d === selectedDate ? " sel" : "") + (d === today ? " istoday" : ""),
+                    onClick: () => gotoDate(d),
+                },
+                    h("span", { className: "wd" }, d === today ? "Heute" : WEEKDAYS[parseISO(d).getDay()]),
+                    h("span", { className: "dt" }, fmtShort(d))))),
+                h("button", { className: "arrowbtn", "aria-label": "Folgetag", disabled: isToday, onClick: () => !isToday && gotoDate(addDays(selectedDate, 1)) }, ICONS.right("nico"))),
+            !isToday && h("div", { className: "jumpbar" },
+                h("span", { className: "jumptxt" }, "Du bearbeitest ", h("strong", null, fmtDay(selectedDate))),
+                h("button", { className: "jumpbtn", onClick: () => gotoDate(today) }, "Zu heute")),
+            // --- Symptome ---
+            h("section", { className: "card card-sym" },
+                ICONS.pulse("watermark"),
+                h("div", { className: "cardhead" },
+                    h("h2", null, "Symptome"),
+                    h("button", { className: "editbtn" + (editCard === "sym" ? " on" : ""), "aria-label": "Symptome bearbeiten", onClick: () => setEditCard(editCard === "sym" ? null : "sym") }, ICONS.pencil("nico"))),
+                editCard === "sym" && h("p", { className: "edithint" }, "Antippen zum Umbenennen oder Löschen (nur eigene Symptome)."),
+                symRows.map((row) => h("div", { className: "symrow", key: row.id },
+                    h("div", { className: "symlabel" },
+                        editCard === "sym" && row.custom
+                            ? h("button", { className: "editable", onClick: () => editTap(row, "Symptom") }, row.label, " ✎")
+                            : h("span", { className: editCard === "sym" && !row.custom ? "dimlabel" : "" }, row.label)),
+                    h("div", { className: "segs" }, SEV_WORDS.map((w) => h("button", {
+                        key: w,
+                        className: "seg seg-" + w + (e[row.id] === w ? " on" : ""),
+                        onClick: () => update(selectedDate, row.id, e[row.id] === w ? "" : w),
+                    }, w))))),
+                h("div", { className: "symrow" },
+                    h("div", { className: "symlabel" }, h("span", null, "Kaki")),
+                    h("div", { className: "segs segs2" }, [["ja", true], ["nein", false]].map(([lab, val]) => h("button", {
+                        key: lab,
+                        className: "seg segneutral" + (e.verstopfung === val ? " on" : ""),
+                        onClick: () => update(selectedDate, "verstopfung", e.verstopfung === val ? null : val),
+                    }, lab)))),
+                h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neues Symptom", placeholder: "z. B. Bauchweh", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "sev" } }) }, "+ Symptom")),
+            // --- Ernährung & Auslöser ---
+            h("section", { className: "card card-trig" },
+                ICONS.apple("watermark"),
+                h("div", { className: "cardhead" },
+                    h("h2", null, "Ernährung & Auslöser"),
+                    h("button", { className: "editbtn" + (editCard === "trig" ? " on" : ""), "aria-label": "Auslöser bearbeiten", onClick: () => setEditCard(editCard === "trig" ? null : "trig") }, ICONS.pencil("nico"))),
+                h("p", { className: "cardsub" }, "Tippen: gegessen ✓ · nicht gegessen – · unbekannt"),
+                editCard === "trig" && h("p", { className: "edithint" }, "Antippen zum Umbenennen oder Löschen (nur eigene Auslöser)."),
+                h("div", { className: "chipgrid" }, trigRows.map((row) => {
+                    const v = e[row.id];
+                    if (editCard === "trig")
+                        return row.custom
+                            ? h("button", { key: row.id, className: "chip editable", onClick: () => editTap(row, "Auslöser") }, row.label + " ✎")
+                            : h("span", { key: row.id, className: "chip lockchip" }, row.label);
+                    const cls = v === true ? " yes" : v === false ? " no" : "";
+                    const mark = v === true ? "✓ " : v === false ? "– " : "";
+                    return h("button", { key: row.id, className: "chip" + cls, onClick: () => cycle(selectedDate, row.id) }, mark + row.label);
+                })),
+                h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neuer Auslöser", placeholder: "z. B. Weizen", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "check" } }) }, "+ Auslöser")),
+            // --- NEM ---
+            h("section", { className: "card card-nem" },
+                ICONS.pill("watermark"),
+                h("div", { className: "cardhead" },
+                    h("h2", null, "NEM"),
+                    h("button", { className: "editbtn" + (editCard === "nem" ? " on" : ""), "aria-label": "NEM bearbeiten", onClick: () => setEditCard(editCard === "nem" ? null : "nem") }, ICONS.pencil("nico"))),
+                h("p", { className: "cardsub" }, "Nahrungsergänzung — heute eingenommen?"),
+                editCard === "nem" && h("p", { className: "edithint" }, "Antippen zum Umbenennen oder Löschen."),
+                h("div", { className: "chipgrid" }, nemOptions.map((opt) => {
+                    if (editCard === "nem")
+                        return h("button", { key: opt, className: "chip editable", onClick: () => setModal({ type: "rowedit", nemName: opt, noun: "NEM" }) }, opt + " ✎");
+                    const on = (e.nem || []).includes(opt);
+                    return h("button", { key: opt, className: "chip" + (on ? " yes" : ""), onClick: () => toggleNem(selectedDate, opt) }, (on ? "✓ " : "") + opt);
+                })),
+                h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neues NEM", placeholder: "z. B. Omega 3", submitLabel: "Hinzufügen", initial: "", action: { kind: "addnem" } }) }, "+ NEM")),
+            // --- Notiz ---
+            h("section", { className: "card card-note" },
+                ICONS.pencil("watermark"),
+                h("div", { className: "cardhead" }, h("h2", null, "Notiz")),
+                h("textarea", { className: "notearea", value: e.notiz || "", placeholder: "Freie Notizen zum Tag…", onChange: (ev) => update(selectedDate, "notiz", ev.target.value) })));
+    }
+    // ---------- Verlaufs-Ansicht ----------
+    function weekView() {
+        const sections = [
+            { key: "sym", label: "Symptome", rows: [...symRows, { id: "verstopfung", label: "Kaki", type: "check" }] },
+            { key: "trig", label: "Ernährung & Auslöser", rows: trigRows },
+            { key: "nem", label: "NEM", rows: nemOptions.map((o) => ({ id: o, label: o, type: "nemopt" })) },
+            { key: "note", label: "Notizen", rows: [{ id: "notiz", label: "Notiz", type: "notiz" }] },
+        ];
+        function cellContent(d, row) {
+            const en = entries[d];
+            if (row.type === "sev") {
+                const v = en[row.id] || "";
+                return h("span", { className: "wsq sev-" + (v || "none") });
+            }
+            if (row.type === "nemopt")
+                return (en.nem || []).includes(row.id) ? h("span", { className: "wdot" }, "✓") : null;
+            if (row.type === "notiz")
+                return en.notiz ? h("span", { className: "wnote" }, "✎") : null;
+            const v = en[row.id];
+            if (v === true)
+                return h("span", { className: "wdot" }, "✓");
+            if (v === false)
+                return h("span", { className: "wno" }, "–");
+            return null;
+        }
+        return h("div", { className: "page" },
+            h("div", { className: "weekintro" },
+                h("h2", { className: "pagetitle" }, "Verlauf"),
+                h("p", { className: "pagesub" }, "Nur Übersicht — zum Bearbeiten Tag antippen.")),
+            h("div", { className: "legend" },
+                h("span", { className: "lg lg-kein" }, "kein"),
+                h("span", { className: "lg lg-bisschen" }, "bisschen"),
+                h("span", { className: "lg lg-mittel" }, "mittel"),
+                h("span", { className: "lg lg-viel" }, "viel")),
+            h("div", { className: "wscroll", ref: weekScrollRef },
+                h("table", { className: "wtable" },
+                    h("thead", null, h("tr", null,
+                        h("th", { className: "wcorner wsticky" }),
+                        dates.map((d) => h("th", { key: d, className: "wday" + (d === today ? " wtoday" : ""), onClick: () => gotoDate(d) },
+                            h("span", { className: "wdv" },
+                                h("span", { className: "wwd" }, WEEKDAYS[parseISO(d).getDay()]),
+                                "  ",
+                                h("span", { className: "wdt" }, fmtShort(d))))))),
+                    h("tbody", null, sections.flatMap((sec) => [
+                        h("tr", { key: "h_" + sec.key, className: "wsec wsec-" + sec.key },
+                            h("td", { className: "wseclabel wsticky" }, sec.label),
+                            h("td", { colSpan: dates.length })),
+                        ...sec.rows.map((row) => h("tr", { key: sec.key + "_" + row.id },
+                            h("td", { className: "wlabel wsticky" }, row.label),
+                            dates.map((d) => h("td", { key: d, className: "wc" + (d === today ? " wtoday" : ""), onClick: () => gotoDate(d) }, cellContent(d, row))))),
+                    ])))));
+    }
+    // ---------- Analyse-Ansicht ----------
+    function analysisView() {
+        const a = analyzeStructured(entries, dates, customRows, nemOptions);
+        const maxVal = Math.max(1, ...[...a.suspects, ...a.calm].flatMap((r) => [r.me, r.mu]));
+        const bar = (val, cls) => h("div", { className: "barwrap" },
+            h("div", { className: "bar " + cls, style: { width: Math.round((val / maxVal) * 100) + "%" } }),
+            h("span", { className: "barval" }, "Ø " + val.toFixed(1)));
+        const resultRow = (r) => h("div", { className: "resrow", key: r.label },
+            h("div", { className: "reslabel" }, r.label, r.constFlag ? h("span", { className: "resflag" }, " · auch seltener Stuhlgang") : null),
+            h("div", { className: "resbars" },
+                h("div", { className: "resline" }, h("span", { className: "resleg" }, "danach"), bar(r.me, "b-hot")),
+                h("div", { className: "resline" }, h("span", { className: "resleg" }, "ohne"), bar(r.mu, "b-cool"))));
+        return h("div", { className: "page" },
+            h("div", { className: "weekintro" },
+                h("h2", { className: "pagetitle" }, "Analyse"),
+                h("p", { className: "pagesub" }, a.enough
+                    ? `Auswertung über ${a.dataDays} Tage · Nachwirken bis 72 h (Stillzeit) berücksichtigt`
+                    : "Noch zu wenig Daten für eine Auswertung")),
+            !a.enough
+                ? h("section", { className: "acard" },
+                    h("p", { className: "atext" }, `Bisher ${a.dataDays} Tag(e) mit erfassten Symptomen. Trage am besten mindestens 7–10 Tage durchgehend Symptome und Lebensmittel ein, dann werden mögliche Muster sichtbar.`))
+                : h(React.Fragment, null,
+                    h("section", { className: "acard" },
+                        h("h3", { className: "ahead ah-hot" }, "Mögliche Auslöser"),
+                        h("p", { className: "ahint" }, "Höhere Symptomlast in den 3 Tagen nach Verzehr/Einnahme — Lebensmittel und jedes NEM einzeln geprüft."),
+                        a.suspects.length === 0
+                            ? h("p", { className: "atext" }, "Kein Lebensmittel zeigt aktuell einen deutlichen Zusammenhang.")
+                            : a.suspects.slice(0, 5).map(resultRow)),
+                    a.suspects.length > 0 && h("section", { className: "acard acard-next" },
+                        h("h3", { className: "ahead ah-lime" }, "Nächster Schritt"),
+                        h("p", { className: "atext" }, "Am aussagekräftigsten ist ein Auslassversuch: Lass „", h("strong", null, a.suspects[0].label), "“ ein paar Tage konsequent weg und beobachte, ob die Symptome zurückgehen.")),
+                    a.calm.length > 0 && h("section", { className: "acard" },
+                        h("h3", { className: "ahead ah-cool" }, "Eher unverdächtig"),
+                        h("p", { className: "ahint" }, "Symptome danach tendenziell geringer."),
+                        a.calm.slice(0, 4).map(resultRow)),
+                    a.tooOften.length > 0 && h("section", { className: "acard" },
+                        h("h3", { className: "ahead" }, "Nicht beurteilbar"),
+                        h("p", { className: "ahint" }, "Fast täglich gegessen — es fehlen Vergleichstage ohne."),
+                        h("div", { className: "achips" }, a.tooOften.map((x) => h("span", { className: "achip", key: x }, x)))),
+                    a.notUsed.length > 0 && h("section", { className: "acard" },
+                        h("h3", { className: "ahead" }, "Nie erfasst"),
+                        h("div", { className: "achips" }, a.notUsed.map((x) => h("span", { className: "achip", key: x }, x))))),
+            h("p", { className: "disclaimer" }, "Hinweis: Das sind statistische Muster, keine Beweise. Bei wenigen Tagen oder Lebensmitteln, die immer zusammen gegessen werden, können Scheinzusammenhänge entstehen. Anhaltende Beschwerden, Blut oder Schleim im Stuhl bitte kinderärztlich abklären."));
+    }
+    return h("div", { className: "app" },
         h(Style, null),
-        h("header", { className: "top" },
+        h("header", { className: "topbar" },
+            h("div", { className: "avatar" }, "👶"),
             h("div", { className: "titles" },
-                h("h1", null, "Ernährungstagebuch"),
-                h("p", { className: "sub" }, "Gestillt · Reaktionen bis 72 h nachwirkend")),
-            h("div", { className: "actions" },
-                h("button", { className: "btn analyze", onClick: runAnalysis }, "Analysieren"),
-                h("button", { className: "btn iconbtn", onClick: () => setModal({ type: "menu" }), "aria-label": "Mehr" }, "⋯"))),
-        h("div", { className: "selbar" },
-            h("span", { className: "seltxt" }, "Bearbeitet wird:"),
-            h("span", { className: "selchip" }, fmtDay(selectedDate)),
-            selectedDate !== today && h("button", { className: "todaybtn", onClick: () => selectDay(today) }, "Heute"),
-            h("span", { className: "selhint" }, "Anderen Tag? Spalte antippen.")),
-        h("div", { className: "legend" },
-            h("span", { className: "lg lg-kein" }, "kein"),
-            h("span", { className: "lg lg-bisschen" }, "bisschen"),
-            h("span", { className: "lg lg-mittel" }, "mittel"),
-            h("span", { className: "lg lg-viel" }, "viel")),
-        h("div", { className: "tablewrap" },
-            showEarlier && h("button", { className: "earlier", onClick: addEarlierDays }, "+ 7 frühere Tage"),
-            h("div", { className: "scroll", ref: scrollRef },
-                h("table", null,
-                    h("thead", null,
-                        h("tr", null,
-                            h("th", { className: "corner sticky-l" }),
-                            daysAsc.map((d) => h("th", {
-                                key: d,
-                                id: "day-" + d,
-                                className: "dayhead" + dayCls(d),
-                                onClick: () => selectDay(d),
-                            },
-                                h("span", { className: "dhv" },
-                                    h("span", { className: "dwd" }, WEEKDAYS[parseISO(d).getDay()]),
-                                    "  ",
-                                    h("span", { className: "ddt" }, fmtShort(d))))))),
-                    h("tbody", null,
-                        sectionRow("sec-sym", "Symptome", "sym"),
-                        symptomRows.map((r) => dataRow(r, "sym", "Symptom")),
-                        addRowTr("add-sym", "+ Symptom", { type: "input", title: "Neues Symptom", placeholder: "z. B. Bauchweh", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "sev" } }, "sym"),
-                        gapRow("gap-1"),
-                        sectionRow("sec-trig", "Ernährung & Auslöser", "trig"),
-                        triggerRows.map((r) => dataRow(r, "trig", "Auslöser")),
-                        addRowTr("add-trig", "+ Auslöser", { type: "input", title: "Neuer Auslöser", placeholder: "z. B. Weizen", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "check" } }, "trig"),
-                        gapRow("gap-2"),
-                        nemHead,
-                        nemRows,
-                        gapRow("gap-3"),
-                        sectionRow("sec-note", "Notizen", "note"),
-                        h("tr", { key: "notiz", className: "sec-note seclast" },
-                            h("td", { className: "rowlabel sticky-l" }, "Notiz"),
-                            daysAsc.map((d) => notizCell(d))))))),
-        modal?.type === "menu" && h(MenuModal, {
+                h("div", { className: "appname" }, "Ernährungstagebuch"),
+                h("div", { className: "appsub" }, "Gestillt · Reaktionen bis 72 h nachwirkend")),
+            h("button", { className: "gearbtn", "aria-label": "Einstellungen", onClick: () => setModal({ type: "settings" }) }, ICONS.gear("nico"))),
+        view === "day" && dayView(),
+        view === "week" && weekView(),
+        view === "analysis" && analysisView(),
+        h("nav", { className: "bottomnav" }, [
+            ["day", "Heute", ICONS.sun],
+            ["week", "Verlauf", ICONS.chart],
+            ["analysis", "Analyse", ICONS.bulb],
+        ].map(([v, label, icon]) => h("button", {
+            key: v,
+            className: "navitem" + (view === v ? " active" : ""),
+            onClick: () => { setView(v); setEditCard(null); },
+        }, icon("navico"), h("span", null, label)))),
+        modal?.type === "settings" && h(SettingsModal, {
             onImport: () => setModal({ type: "import" }),
             onExport: exportCSV,
             onClose: () => setModal(null),
         }),
-        modal?.type === "notiz" && h(NotizModal, { value: entries[modal.date].notiz || "", onChange: (v) => update(modal.date, "notiz", v), onClose: () => setModal(null), dateLabel: fmtDay(modal.date) }),
         modal?.type === "rowedit" && h(RowEditModal, {
             label: modal.nemName || customRows.find((r) => r.id === modal.rowId)?.label || "",
             noun: modal.noun,
@@ -678,9 +711,9 @@ function App() {
         modal?.type === "input" && h(InputModal, { title: modal.title, placeholder: modal.placeholder, submitLabel: modal.submitLabel, initial: modal.initial, onSubmit: (v) => runModalAction(modal.action, v), onClose: () => setModal(null) }),
         modal?.type === "confirm" && h(ConfirmModal, { text: modal.text, submitLabel: modal.submitLabel, onConfirm: () => runModalAction(modal.action), onClose: () => setModal(null) }),
         modal?.type === "import" && h(ImportModal, { onImport: importCSV, onClose: () => setModal(null) }),
-        modal?.type === "csv" && h(CsvModal, { csv: modal.csv, onClose: () => setModal(null) }),
-        analysis && h(AnalysisModal, { text: analysis, onClose: () => setAnalysis(null) }));
+        modal?.type === "csv" && h(CsvModal, { csv: modal.csv, onClose: () => setModal(null) }));
 }
+// ================= Sheets =================
 function Sheet({ onClose, children, className }) {
     return h("div", { className: "sheet-bg", onClick: onClose },
         h("div", { className: "sheet" + (className ? " " + className : ""), onClick: (e) => e.stopPropagation() },
@@ -692,9 +725,9 @@ function SheetHead({ title, onClose }) {
         h("strong", null, title),
         h("button", { className: "x", onClick: onClose }, "✕"));
 }
-function MenuModal({ onImport, onExport, onClose }) {
+function SettingsModal({ onImport, onExport, onClose }) {
     return h(Sheet, { onClose },
-        h(SheetHead, { title: "Mehr", onClose }),
+        h(SheetHead, { title: "Einstellungen", onClose }),
         h("button", { className: "menuitem", onClick: onImport },
             h("span", { className: "mi-ic" }, "📥"),
             h("span", { className: "mi-tx" },
@@ -704,13 +737,8 @@ function MenuModal({ onImport, onExport, onClose }) {
             h("span", { className: "mi-ic" }, "📤"),
             h("span", { className: "mi-tx" },
                 h("strong", null, "Export (CSV)"),
-                h("small", null, "Alle Daten als Text / Datei sichern"))));
-}
-function NotizModal({ value, onChange, onClose, dateLabel }) {
-    return h(Sheet, { onClose },
-        h(SheetHead, { title: "Notiz · " + dateLabel, onClose }),
-        h("textarea", { autoFocus: true, value: value, onChange: (e) => onChange(e.target.value), placeholder: "Freie Notizen zum Tag…" }),
-        h("button", { className: "btn primary wide", onClick: onClose }, "Fertig"));
+                h("small", null, "Alle Daten als Text / Datei sichern"))),
+        h("p", { className: "hint" }, "Alle Daten bleiben lokal auf diesem Gerät gespeichert."));
 }
 function InputModal({ title, placeholder, submitLabel, initial, onSubmit, onClose }) {
     const [txt, setTxt] = useState(initial || "");
@@ -786,24 +814,8 @@ function CsvModal({ csv, onClose }) {
         h("button", { className: "btn primary wide", onClick: copy }, copied ? "Kopiert ✓" : "In Zwischenablage kopieren"),
         h("a", { className: "btn wide dl", href: dataUrl, download: `ernaehrungstagebuch_${iso(new Date())}.csv` }, "Als Datei laden (falls unterstützt)"));
 }
-function AnalysisModal({ text, onClose }) {
-    const parts = [];
-    text.split("\n").forEach((ln, i) => {
-        if (i > 0)
-            parts.push("\n");
-        const m = ln.match(/^([A-ZÄÖÜ]{2}[A-ZÄÖÜ\s]*)/);
-        if (m && m[1].trim().length >= 4)
-            parts.push(h("strong", { key: i }, m[1]), ln.slice(m[1].length));
-        else
-            parts.push(ln);
-    });
-    return h(Sheet, { onClose, className: "analysis" },
-        h(SheetHead, { title: "Analyse", onClose }),
-        h("div", { className: "analysis-body" }, parts),
-        h("button", { className: "btn wide", onClick: onClose }, "Schließen"));
-}
 // ================= Analyse =================
-function analyze(entries, orderedDates, customRows, nemOptions) {
+function analyzeStructured(entries, orderedDates, customRows, nemOptions) {
     // Alle NEM, die irgendwo eingetragen wurden (auch bereits gelöschte Optionen)
     const nemUsed = new Set(nemOptions);
     orderedDates.forEach((d) => (entries[d].nem || []).forEach((x) => nemUsed.add(x)));
@@ -827,10 +839,10 @@ function analyze(entries, orderedDates, customRows, nemOptions) {
         constip[d] = e.verstopfung === false;
     });
     const dataDays = orderedDates.filter((d) => hasData[d]);
-    if (dataDays.length < 5) {
-        return `Noch zu wenig Daten für eine Auswertung.\n\nBisher ${dataDays.length} Tag(e) mit erfassten Symptomen. Trage am besten mindestens 7–10 Tage durchgehend Symptome und Lebensmittel ein, dann werden mögliche Muster sichtbar.`;
-    }
-    const results = [], tooOften = [], notUsed = [];
+    const out = { dataDays: dataDays.length, enough: dataDays.length >= 5, suspects: [], calm: [], tooOften: [], notUsed: [] };
+    if (!out.enough)
+        return out;
+    const results = [];
     inputCols.forEach((col) => {
         const consumed = new Set();
         orderedDates.forEach((d) => {
@@ -842,7 +854,7 @@ function analyze(entries, orderedDates, customRows, nemOptions) {
                 consumed.add(d);
         });
         if (consumed.size === 0) {
-            notUsed.push(col.label);
+            out.notUsed.push(col.label);
             return;
         }
         let expSum = 0, expN = 0, unSum = 0, unN = 0, expC = 0, unC = 0;
@@ -871,193 +883,204 @@ function analyze(entries, orderedDates, customRows, nemOptions) {
         });
         if (expN < 2 || unN < 2) {
             if (expN >= 2 && unN < 2)
-                tooOften.push(col.label);
+                out.tooOften.push(col.label);
             return;
         }
         const me = expSum / expN, mu = unSum / unN;
-        results.push({ label: col.label, diff: me - mu, me, mu, constDiff: expC / expN - unC / unN });
+        results.push({ label: col.label, diff: me - mu, me, mu, constFlag: expC / expN - unC / unN > 0.25 });
     });
     results.sort((a, b) => b.diff - a.diff);
-    const suspects = results.filter((r) => r.diff > 0.5);
-    const calm = results.filter((r) => r.diff < -0.5);
-    let out = `Auswertung über ${dataDays.length} Tage mit Symptomdaten.\nBerücksichtigt wird ein Nachwirken von bis zu 72 Stunden (Stillzeit).\n\n`;
-    out += "MÖGLICHE AUSLÖSER (höhere Symptomlast in den 3 Tagen nach Verzehr/Einnahme – Lebensmittel und jedes NEM einzeln geprüft):\n";
-    if (suspects.length === 0)
-        out += "Kein Lebensmittel zeigt aktuell einen deutlichen Zusammenhang.\n";
-    else
-        suspects.slice(0, 5).forEach((r) => {
-            const c = r.constDiff > 0.25 ? " · auch seltener Stuhlgang" : "";
-            out += `• ${r.label}: Ø ${r.me.toFixed(1)} statt ${r.mu.toFixed(1)} Symptompunkte${c}\n`;
-        });
-    if (calm.length) {
-        out += "\nEHER UNVERDÄCHTIG (Symptome tendenziell geringer):\n";
-        calm.slice(0, 4).forEach((r) => { out += `• ${r.label}: Ø ${r.me.toFixed(1)} statt ${r.mu.toFixed(1)}\n`; });
-    }
-    if (tooOften.length)
-        out += `\nNICHT BEURTEILBAR (fast täglich gegessen – es fehlen Vergleichstage ohne):\n${tooOften.join(", ")}\n`;
-    if (notUsed.length)
-        out += `\nNie erfasst: ${notUsed.join(", ")}\n`;
-    if (suspects.length)
-        out += `\nNÄCHSTER SCHRITT: Am aussagekräftigsten ist ein Auslassversuch. Lass „${suspects[0].label}" ein paar Tage konsequent weg und beobachte, ob die Symptome zurückgehen.`;
-    out += "\n\nHinweis: Das sind statistische Muster, keine Beweise. Bei wenigen Tagen oder Lebensmitteln, die immer zusammen gegessen werden, können Scheinzusammenhänge entstehen. Anhaltende Beschwerden, Blut oder Schleim im Stuhl bitte kinderärztlich abklären.";
+    out.suspects = results.filter((r) => r.diff > 0.5);
+    out.calm = results.filter((r) => r.diff < -0.5).sort((a, b) => a.diff - b.diff);
     return out;
 }
 // ================= Styles =================
 function Style() {
     return h("style", null, `
       :root {
-        --accent: #6d28d9; --accent-2: #0ea5e9; --accent-soft: #ede9fe;
-        --ink: #1e293b; --mut: #64748b; --line: #e2e8f0; --card: #ffffff;
-        --sym: #ea580c; --sym-soft: #fff7ed;
-        --trig: #0369a1; --trig-soft: #f0f9ff;
-        --nem: #7c3aed; --nem-soft: #f5f3ff;
-        --note: #db2777; --note-soft: #fdf2f8;
+        --bg: #141b2b; --surface: #1d2637; --surface2: #28334a; --line: #324058;
+        --ink: #f2f5fa; --mut: #8b96ab;
+        --lime: #c3d63f; --lime-ink: #232b0a;
+        --c-sym: #e8794a; --c-sym-deep: #8a3a17;
+        --c-trig: #4fb8dd; --c-trig-deep: #0d5e80;
+        --c-nem: #56c778; --c-nem-deep: #14602f;
+        --c-note: #8f86e8; --c-note-deep: #3d34a0;
         --sev-kein: #4ade80; --sev-bisschen: #a3e635; --sev-mittel: #fb923c; --sev-viel: #ef4444;
-        --colw: 32px; --colw-sel: 46px; --labelw: 108px; --rowh: 36px;
       }
       * { box-sizing: border-box; }
-      .wrap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink);
-        background: linear-gradient(160deg, #ede9fe 0%, #e0f2fe 55%, #fdf2f8 100%);
-        min-height: 100vh; padding: 12px; -webkit-text-size-adjust: 100%; }
-      .loading { padding: 40px; text-align: center; color: var(--mut); }
+      .app { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink);
+        background: var(--bg); min-height: 100vh; padding-bottom: calc(78px + env(safe-area-inset-bottom));
+        -webkit-text-size-adjust: 100%; max-width: 560px; margin: 0 auto; }
+      .loading { padding: 40px; text-align: center; color: var(--mut); background: var(--bg); min-height: 100vh; }
+      button { -webkit-tap-highlight-color: transparent; }
 
-      .top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
-        background: linear-gradient(120deg, #7c3aed, #0ea5e9); color: #fff; border-radius: 16px;
-        padding: 14px 16px; margin-bottom: 10px; box-shadow: 0 10px 30px rgba(109,40,217,.25); }
-      h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
-      .sub { margin: 2px 0 0; font-size: 12px; color: rgba(255,255,255,.85); }
-      .actions { display: flex; gap: 8px; align-items: center; }
-      .btn { border: 1px solid var(--line); background: #fff; color: var(--ink); padding: 9px 13px; border-radius: 12px; font-size: 13px; font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-      .btn:active { transform: translateY(1px); }
-      .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-      .btn.wide { width: 100%; margin-top: 12px; padding: 12px; }
-      .btn.analyze { background: #fff; color: var(--accent); border: none; font-weight: 700; box-shadow: 0 3px 10px rgba(0,0,0,.15); }
-      .btn.iconbtn { background: rgba(255,255,255,.22); color: #fff; border: none; width: 38px; height: 38px; padding: 0; border-radius: 50%; font-size: 18px; line-height: 1; }
+      .topbar { display: flex; align-items: center; gap: 11px; padding: 14px 16px 6px; }
+      .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 20px; flex: 0 0 auto; }
+      .titles { flex: 1; min-width: 0; }
+      .appname { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+      .appsub { font-size: 11.5px; color: var(--mut); margin-top: 1px; }
+      .gearbtn { border: none; background: var(--surface2); color: var(--mut); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+      .nico { width: 20px; height: 20px; }
 
-      .selbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--card);
-        border-radius: 12px; padding: 8px 12px; margin-bottom: 8px; box-shadow: 0 4px 14px rgba(30,41,59,.06); font-size: 12.5px; }
-      .seltxt { color: var(--mut); font-weight: 600; }
-      .selchip { background: var(--accent); color: #fff; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
-      .todaybtn { border: 1px solid var(--accent); color: var(--accent); background: #fff; border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
-      .selhint { color: var(--mut); margin-left: auto; font-size: 11.5px; }
+      .page { padding: 2px 0 8px; }
 
-      .legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 2px 8px; font-size: 11px; }
+      /* Datums-Navigation */
+      .datebar { display: flex; align-items: center; gap: 4px; padding: 6px 8px 0; }
+      .arrowbtn { border: none; background: var(--surface2); color: var(--ink); width: 36px; height: 44px; border-radius: 14px; cursor: pointer; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+      .arrowbtn:disabled { opacity: .35; }
+      .dchips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; flex: 1; padding: 2px; }
+      .dchips::-webkit-scrollbar { display: none; }
+      .dchip { flex: 0 0 auto; border: 1.5px solid transparent; background: var(--surface); border-radius: 14px; padding: 5px 11px; text-align: center; cursor: pointer; }
+      .dchip .wd { display: block; font-size: 10px; font-weight: 700; color: var(--mut); }
+      .dchip .dt { display: block; font-size: 12.5px; font-weight: 800; color: var(--ink); margin-top: 1px; }
+      .dchip.istoday { border-color: rgba(195,214,63,.55); }
+      .dchip.istoday .wd { color: var(--lime); }
+      .dchip.sel { background: var(--lime); border-color: var(--lime); }
+      .dchip.sel .wd, .dchip.sel .dt { color: var(--lime-ink); }
+
+      .jumpbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 12px 0; background: var(--surface); border-radius: 14px; padding: 9px 12px; font-size: 12.5px; color: var(--mut); }
+      .jumpbar strong { color: var(--ink); }
+      .jumpbtn { border: 1.5px solid var(--lime); color: var(--lime); background: transparent; border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 800; cursor: pointer; }
+
+      /* Karten */
+      .card { position: relative; overflow: hidden; border-radius: 24px; padding: 16px 16px 18px; margin: 12px 12px 0; color: #fff; }
+      .card-sym { background: var(--c-sym); }
+      .card-trig { background: var(--c-trig); }
+      .card-nem { background: var(--c-nem); }
+      .card-note { background: var(--c-note); }
+      .watermark { position: absolute; right: -14px; bottom: -18px; width: 110px; height: 110px; opacity: .18; pointer-events: none; }
+      .cardhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .card h2 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -0.01em; }
+      .cardsub { margin: 4px 0 0; font-size: 12px; color: rgba(255,255,255,.75); position: relative; }
+      .edithint { margin: 8px 0 0; font-size: 12px; color: rgba(255,255,255,.9); background: rgba(0,0,0,.18); border-radius: 10px; padding: 6px 10px; position: relative; }
+      .editbtn { border: none; background: rgba(0,0,0,.18); color: rgba(255,255,255,.85); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+      .editbtn.on { background: #fff; color: #333; }
+      .editbtn .nico { width: 16px; height: 16px; }
+
+      /* Symptome: Segmente */
+      .symrow { margin-top: 13px; position: relative; }
+      .symlabel { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+      .symlabel .editable { border: none; background: rgba(0,0,0,.18); color: #fff; font: inherit; border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+      .dimlabel { opacity: .85; }
+      .segs { display: flex; gap: 3px; background: rgba(0,0,0,.22); border-radius: 999px; padding: 3px; }
+      .segs2 { max-width: 220px; }
+      .seg { flex: 1; border: none; background: transparent; color: rgba(255,255,255,.8); font-size: 12.5px; font-weight: 700; padding: 8px 0; border-radius: 999px; cursor: pointer; }
+      .seg.on.seg-kein { background: var(--sev-kein); color: #0b3018; }
+      .seg.on.seg-bisschen { background: var(--sev-bisschen); color: #2c3a08; }
+      .seg.on.seg-mittel { background: var(--sev-mittel); color: #4a1e02; }
+      .seg.on.seg-viel { background: var(--sev-viel); color: #fff; }
+      .seg.segneutral.on { background: #fff; color: #333; }
+
+      /* Chips */
+      .chipgrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; position: relative; }
+      .chip { border: 1.5px solid rgba(255,255,255,.55); background: transparent; color: #fff; border-radius: 999px; padding: 9px 14px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+      .card-trig .chip.yes { background: #fff; border-color: #fff; color: var(--c-trig-deep); }
+      .card-nem .chip.yes { background: #fff; border-color: #fff; color: var(--c-nem-deep); }
+      .chip.no { background: rgba(0,0,0,.25); border-color: transparent; color: rgba(255,255,255,.6); text-decoration: line-through; }
+      .chip.editable { border-style: solid; background: rgba(0,0,0,.18); border-color: transparent; }
+      .chip.lockchip { opacity: .45; border-style: solid; }
+      .addchip { margin-top: 14px; border: 1.5px dashed rgba(255,255,255,.6); background: transparent; color: #fff; border-radius: 999px; padding: 9px 16px; font-size: 13.5px; font-weight: 800; cursor: pointer; position: relative; }
+
+      /* Notiz */
+      .notearea { width: 100%; min-height: 90px; margin-top: 12px; border: none; border-radius: 14px; background: rgba(0,0,0,.2); color: #fff; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; position: relative; }
+      .notearea::placeholder { color: rgba(255,255,255,.55); }
+      .notearea:focus { outline: 2px solid rgba(255,255,255,.45); }
+      .modalinput:focus, .csvbox:focus { outline: 2px solid rgba(195,214,63,.5); }
+
+      /* Verlauf */
+      .weekintro { padding: 10px 16px 0; }
+      .pagetitle { margin: 0; font-size: 21px; font-weight: 800; }
+      .pagesub { margin: 3px 0 0; font-size: 12.5px; color: var(--mut); }
+      .legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 16px 0; font-size: 11px; }
       .lg { padding: 2px 9px; border-radius: 20px; font-weight: 700; }
-      .lg-kein { background: var(--sev-kein); color: #14532d; }
-      .lg-bisschen { background: var(--sev-bisschen); color: #3f6212; }
-      .lg-mittel { background: var(--sev-mittel); color: #7c2d12; }
+      .lg-kein { background: var(--sev-kein); color: #0b3018; }
+      .lg-bisschen { background: var(--sev-bisschen); color: #2c3a08; }
+      .lg-mittel { background: var(--sev-mittel); color: #4a1e02; }
       .lg-viel { background: var(--sev-viel); color: #fff; }
+      .wscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 10px 12px 0; border-radius: 18px; background: var(--surface); }
+      .wtable { border-collapse: separate; border-spacing: 0; }
+      .wsticky { position: sticky; left: 0; background: var(--surface); z-index: 2; }
+      .wcorner { min-width: 104px; width: 104px; border-bottom: 1px solid var(--line); }
+      .wday { min-width: 34px; width: 34px; padding: 6px 0 5px; border-bottom: 1px solid var(--line); vertical-align: bottom; cursor: pointer; }
+      .wdv { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; display: inline-block; line-height: 1; }
+      .wwd { font-size: 10px; font-weight: 700; color: var(--mut); }
+      .wdt { font-size: 11px; font-weight: 700; color: var(--ink); margin-top: 3px; }
+      .wday.wtoday .wwd, .wday.wtoday .wdt { color: var(--lime); }
+      .wseclabel { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 8px 12px 4px; white-space: nowrap; }
+      .wsec-sym .wseclabel { color: var(--c-sym); }
+      .wsec-trig .wseclabel { color: var(--c-trig); }
+      .wsec-nem .wseclabel { color: var(--c-nem); }
+      .wsec-note .wseclabel { color: var(--c-note); }
+      .wlabel { font-size: 12px; font-weight: 600; padding: 0 12px; white-space: nowrap; height: 32px; border-right: 1px solid var(--line); min-width: 104px; width: 104px; }
+      .wc { text-align: center; vertical-align: middle; height: 32px; min-width: 34px; cursor: pointer; border-bottom: 1px solid rgba(50,64,88,.35); }
+      .wc.wtoday { background: rgba(195,214,63,.07); }
+      .wsq { display: inline-block; width: 17px; height: 17px; border-radius: 6px; }
+      .wsq.sev-none { border: 1.5px dashed var(--line); }
+      .wsq.sev-kein { background: var(--sev-kein); }
+      .wsq.sev-bisschen { background: var(--sev-bisschen); }
+      .wsq.sev-mittel { background: var(--sev-mittel); }
+      .wsq.sev-viel { background: var(--sev-viel); }
+      .wdot { color: var(--ink); font-size: 12px; font-weight: 800; }
+      .wno { color: var(--mut); font-weight: 700; }
+      .wnote { color: var(--mut); font-size: 12px; }
 
-      .tablewrap { position: relative; }
-      .earlier { position: absolute; z-index: 7; top: 6px; left: calc(var(--labelw) + 8px);
-        border: none; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
-        padding: 6px 12px; border-radius: 20px; cursor: pointer; box-shadow: 0 4px 12px rgba(109,40,217,.35);
-        animation: pop .18s ease; }
-      @keyframes pop { from { transform: scale(.85); opacity: 0 } to { transform: none; opacity: 1 } }
+      /* Analyse */
+      .acard { background: var(--surface); border-radius: 20px; padding: 14px 16px; margin: 12px 12px 0; }
+      .acard-next { border: 1.5px solid rgba(195,214,63,.5); }
+      .ahead { margin: 0; font-size: 15px; font-weight: 800; color: var(--ink); }
+      .ah-hot { color: var(--c-sym); }
+      .ah-cool { color: var(--c-nem); }
+      .ah-lime { color: var(--lime); }
+      .ahint { margin: 3px 0 0; font-size: 12px; color: var(--mut); }
+      .atext { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--ink); }
+      .resrow { margin-top: 12px; }
+      .reslabel { font-size: 13.5px; font-weight: 700; }
+      .resflag { font-size: 11.5px; font-weight: 600; color: var(--mut); }
+      .resbars { margin-top: 5px; display: flex; flex-direction: column; gap: 3px; }
+      .resline { display: flex; align-items: center; gap: 8px; }
+      .resleg { font-size: 10.5px; color: var(--mut); width: 42px; flex: 0 0 auto; text-align: right; }
+      .barwrap { flex: 1; display: flex; align-items: center; gap: 7px; }
+      .bar { height: 9px; border-radius: 5px; min-width: 3px; }
+      .b-hot { background: var(--c-sym); }
+      .b-cool { background: var(--surface2); }
+      .barval { font-size: 11px; color: var(--mut); font-weight: 700; }
+      .achips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+      .achip { background: var(--surface2); color: var(--ink); border-radius: 999px; padding: 4px 11px; font-size: 12px; font-weight: 600; }
+      .disclaimer { margin: 14px 16px 0; font-size: 11.5px; line-height: 1.5; color: var(--mut); }
 
-      .scroll { overflow-x: auto; border-radius: 14px; background: var(--card); -webkit-overflow-scrolling: touch;
-        box-shadow: 0 8px 24px rgba(30,41,59,.08); }
-      table { border-collapse: separate; border-spacing: 0; }
+      /* Bottom-Nav */
+      .bottomnav { position: fixed; left: 0; right: 0; bottom: 0; background: #101624; border-top: 1px solid #202b41;
+        display: flex; justify-content: space-around; padding: 7px 10px calc(7px + env(safe-area-inset-bottom)); z-index: 30; }
+      .navitem { border: none; background: transparent; color: var(--mut); display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 700; cursor: pointer; padding: 3px 16px; border-radius: 12px; }
+      .navico { width: 23px; height: 23px; }
+      .navitem.active { color: var(--lime); }
 
-      thead .dayhead { position: sticky; top: 0; z-index: 3; background: #f8fafc; color: #475569; padding: 6px 0 5px;
-        border-bottom: 1px solid var(--line); border-right: 1px solid #f1f5f9; text-align: center;
-        min-width: var(--colw); width: var(--colw); vertical-align: bottom; cursor: pointer;
-        transition: min-width .15s ease, width .15s ease, background .15s ease; }
-      .dayhead.we { background: #eef2f7; }
-      .dayhead.today .ddt { color: var(--accent-2); }
-      .dayhead.today .dwd { color: var(--accent-2); }
-      .dayhead.selcol { background: var(--accent); }
-      .dayhead.selcol .dwd, .dayhead.selcol .ddt { color: #fff; }
-      .dhv { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; display: inline-block; line-height: 1; }
-      .dwd { font-size: 10px; font-weight: 700; color: #94a3b8; }
-      .ddt { font-size: 11px; font-weight: 700; margin-top: 3px; }
-
-      .corner { position: sticky; left: 0; top: 0; z-index: 5; background: #f8fafc; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); min-width: var(--labelw); width: var(--labelw); }
-
-      .sticky-l { position: sticky; left: 0; }
-      .rowlabel { z-index: 2; background: var(--card); text-align: left; white-space: nowrap; padding: 0 10px; font-size: 12px; font-weight: 600; min-width: var(--labelw); width: var(--labelw); height: var(--rowh); border-right: 1px solid var(--line); border-bottom: 1px solid #f1f5f9; }
-      .nemlabel { padding-left: 18px; font-weight: 500; }
-
-      /* Durchgehende bunte Rahmen um jeden Block */
-      tr.sec-sym { --sc: var(--sym); --sc-soft: var(--sym-soft); }
-      tr.sec-trig { --sc: var(--trig); --sc-soft: var(--trig-soft); }
-      tr.sec-nem { --sc: var(--nem); --sc-soft: var(--nem-soft); }
-      tr.sec-note { --sc: var(--note); --sc-soft: var(--note-soft); }
-      tbody tr[class*="sec-"] > td:first-child { border-left: 2px solid var(--sc, transparent); }
-      tbody tr[class*="sec-"] > td.lastc { border-right: 2px solid var(--sc, transparent); }
-      tbody tr.secrow > td { border-top: 2px solid var(--sc, transparent); }
-      tbody tr.seclast > td { border-bottom: 2px solid var(--sc, transparent); }
-
-      .seclabel { position: sticky; left: 0; z-index: 2; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 5px 10px; border-right: 1px solid var(--line); border-bottom: 1px solid #f1f5f9; min-width: var(--labelw); width: var(--labelw); white-space: nowrap; background: var(--sc-soft); color: var(--sc); }
-      tr.secrow td.dc { background: var(--sc-soft); }
-      tr.gap td { height: 8px; padding: 0; border: none; background: var(--card); }
-      tr.gap td.dc { height: 8px; background: var(--card); border: none; }
-      .gaplabel { z-index: 2; background: var(--card); min-width: var(--labelw); width: var(--labelw); }
-      .nemtoggle { border: none; background: transparent; font: inherit; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--nem); cursor: pointer; padding: 0; display: inline-flex; align-items: center; gap: 5px; }
-      .chev { display: inline-block; transition: transform .15s ease; font-size: 11px; }
-      .chev.open { transform: rotate(90deg); }
-
-      .addcell { border-bottom: 1px solid #f1f5f9; }
-      tr.addtr td.dc { background: #fcfcfd; }
-      .addbtn { border: 1.5px dashed #cbd5e1; background: transparent; color: var(--mut); font-size: 12px; font-weight: 700; border-radius: 16px; padding: 4px 10px; cursor: pointer; }
-      .sec-sym .addbtn { color: var(--sym); border-color: #fed7aa; }
-      .sec-trig .addbtn { color: var(--trig); border-color: #bae6fd; }
-      .sec-nem .addbtn { color: var(--nem); border-color: #ddd6fe; }
-
-      .dc { width: var(--colw); min-width: var(--colw); height: var(--rowh); padding: 0; background: var(--card);
-        border-right: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9; text-align: center; vertical-align: middle;
-        transition: min-width .15s ease, width .15s ease; }
-      .dc.we { background: #f8fafc; }
-      .dc.ro { cursor: pointer; }
-      .dc.ro > * { opacity: .65; }
-      .dc.selcol { width: var(--colw-sel); min-width: var(--colw-sel); background: #faf5ff;
-        box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent); }
-
-      .cellbtn { width: 100%; height: 100%; border: none; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; -webkit-tap-highlight-color: transparent; padding: 0; }
-      .mk { display: inline-flex; align-items: center; justify-content: center; }
-      .mk.yes { background: #334155; color: #fff; width: 20px; height: 20px; border-radius: 7px; font-size: 12px; font-weight: 800; }
-      .mk.no { color: #94a3b8; font-size: 14px; font-weight: 700; }
-      .ph { color: #cbd5e1; font-size: 14px; font-weight: 400; }
-      .badge { background: #ddd6fe; color: #5b21b6; border-radius: 9px; min-width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; padding: 0 4px; }
-      .notemark { color: #475569; font-size: 13px; }
-
-      .sevwrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-      .sevchip { width: 20px; height: 20px; border-radius: 7px; border: 1.5px dashed #e2e8f0; background: transparent; margin: 0 auto; display: inline-block; vertical-align: middle; }
-      .sevchip.sev-kein { background: var(--sev-kein); border: none; }
-      .sevchip.sev-bisschen { background: var(--sev-bisschen); border: none; }
-      .sevchip.sev-mittel { background: var(--sev-mittel); border: none; }
-      .sevchip.sev-viel { background: var(--sev-viel); border: none; }
-      .sevsel { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: none; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
-
-      .sheet-bg { position: fixed; inset: 0; background: rgba(30,27,75,.45); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
-      .sheet { background: #fff; width: 100%; max-width: 460px; border-radius: 20px 20px 0 0; padding: 10px 16px 16px; box-shadow: 0 -8px 30px rgba(0,0,0,.2); animation: up .18s ease; }
-      .grab { width: 38px; height: 4px; border-radius: 2px; background: #e2e8f0; margin: 2px auto 10px; }
+      /* Sheets */
+      .sheet-bg { position: fixed; inset: 0; background: rgba(5,8,15,.6); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+      .sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 460px; border-radius: 20px 20px 0 0; padding: 10px 16px 20px; box-shadow: 0 -8px 30px rgba(0,0,0,.4); animation: up .18s ease; }
+      .grab { width: 38px; height: 4px; border-radius: 2px; background: var(--surface2); margin: 2px auto 10px; }
       @keyframes up { from { transform: translateY(20px); opacity: .6 } to { transform: none; opacity: 1 } }
       .sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 15px; }
-      .x { border: none; background: #f1f5f9; width: 30px; height: 30px; border-radius: 50%; font-size: 14px; cursor: pointer; color: #475569; }
-
-      .menuitem { display: flex; align-items: center; gap: 12px; width: 100%; border: 1px solid var(--line); background: #fff; border-radius: 14px; padding: 12px; margin-bottom: 8px; cursor: pointer; text-align: left; }
-      .menuitem:active { background: #f8fafc; }
+      .x { border: none; background: var(--surface2); color: var(--mut); width: 30px; height: 30px; border-radius: 50%; font-size: 14px; cursor: pointer; }
+      .btn { border: 1px solid var(--line); background: var(--surface2); color: var(--ink); padding: 9px 13px; border-radius: 14px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+      .btn:active { transform: translateY(1px); }
+      .btn.primary { background: var(--lime); color: var(--lime-ink); border-color: var(--lime); }
+      .btn.wide { width: 100%; margin-top: 10px; padding: 13px; }
+      .btn.danger { color: #ff8f8f; border-color: #5c3038; background: transparent; }
+      .btn:disabled { opacity: .45; cursor: default; }
+      .menuitem { display: flex; align-items: center; gap: 12px; width: 100%; border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: 16px; padding: 13px; margin-bottom: 8px; cursor: pointer; text-align: left; }
       .mi-ic { font-size: 20px; }
       .mi-tx { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
       .mi-tx small { color: var(--mut); font-size: 12px; }
-
-      textarea { width: 100%; min-height: 120px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 14px; font-family: inherit; resize: vertical; }
-      .analysis { max-width: 520px; }
-      .analysis-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.5; color: #334155; max-height: 60vh; overflow-y: auto; }
-      .analysis-body strong { color: var(--accent); }
-      .hint { font-size: 12.5px; color: var(--mut); margin: 0 0 10px; }
-      .csvbox { width: 100%; height: 150px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: pre; }
+      .hint { font-size: 12.5px; color: var(--mut); margin: 4px 0 10px; }
+      .modalinput { width: 100%; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); border-radius: 12px; padding: 12px; font-size: 15px; }
+      .modalinput::placeholder { color: var(--mut); }
+      .confirmtext { font-size: 14px; color: var(--ink); margin: 0 0 4px; line-height: 1.45; }
+      .csvbox { width: 100%; height: 150px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: pre; background: var(--surface2); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+      .fileinput { display: block; width: 100%; font-size: 13px; margin-bottom: 10px; color: var(--mut); }
+      .okmsg { color: #7ade9c; font-size: 13px; margin: 10px 0 4px; }
+      .errmsg { color: #ff8f8f; font-size: 13px; margin: 10px 0 4px; }
       .dl { display: block; text-align: center; text-decoration: none; margin-top: 8px; }
-      .rowedit { border: none; background: transparent; padding: 0; font: inherit; font-weight: inherit; color: inherit; cursor: pointer; }
-      .editicon { color: #b6bdc9; font-size: 10px; }
-      .btn.danger { color: #b91c1c; border-color: #fecaca; margin-top: 8px; }
-      .modalinput { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 15px; }
-      .confirmtext { font-size: 14px; color: #334155; margin: 0 0 4px; line-height: 1.45; }
-      .btn:disabled { opacity: .45; cursor: default; }
-      .fileinput { display: block; width: 100%; font-size: 13px; margin-bottom: 10px; }
-      .okmsg { color: #15803d; font-size: 13px; margin: 10px 0 4px; }
-      .errmsg { color: #b91c1c; font-size: 13px; margin: 10px 0 4px; }
     `);
 }
 
