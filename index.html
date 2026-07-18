@@ -42,27 +42,28 @@
 "use strict";
 const { useState, useEffect, useRef } = React;
 const h = React.createElement;
-// ---------- Konfiguration ----------
+// ================= Supabase-Konfiguration =================
+// <<HIER EINTRAGEN>> — Projekt-URL und anon public key aus deinem Supabase-Projekt
+// (Dashboard -> Project Settings -> API). Solange beides leer ist, läuft die App
+// rein lokal ohne Login. Anleitung: siehe README.md
+const SUPABASE_URL = "";
+const SUPABASE_ANON_KEY = "";
+const SUPABASE_ENABLED = /^https:\/\//.test(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
+// ---------- Konfiguration / Vorlagen ----------
 const WEEKDAYS = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
-const SEV_OPTIONS = [
-    { v: "", label: "–", n: null },
-    { v: "kein", label: "kein", n: 0 },
-    { v: "bisschen", label: "bisschen", n: 1 },
-    { v: "mittel", label: "mittel", n: 2 },
-    { v: "viel", label: "viel", n: 3 },
-];
-const SEV_WORDS = ["kein", "bisschen", "mittel", "viel"];
+const SEV_STEPS = ["", "kein", "bisschen", "mittel", "viel"];
 const sevVal = (v) => {
-    const o = SEV_OPTIONS.find((x) => x.v === v);
-    return o ? o.n : null;
+    const i = SEV_STEPS.indexOf(v || "");
+    return i > 0 ? i - 1 : null;
 };
-const SEV_COLS = [
-    { id: "reflux_tag", label: "Reflux Tag" },
-    { id: "reflux_nacht", label: "Reflux Nacht" },
-    { id: "weinen_tag", label: "Weinen Tag" },
-    { id: "weinen_abends", label: "Weinen Abends" },
+const TPL_SYMPTOMS = [
+    { id: "reflux_tag", label: "Reflux Tag", type: "sev" },
+    { id: "reflux_nacht", label: "Reflux Nacht", type: "sev" },
+    { id: "weinen_tag", label: "Weinen Tag", type: "sev" },
+    { id: "weinen_abends", label: "Weinen Abends", type: "sev" },
+    { id: "verstopfung", label: "Kaki", type: "check" },
 ];
-const FOODS = [
+const TPL_FOODS = [
     { id: "f_kapseln", label: "Kapseln" },
     { id: "f_eier", label: "Eier" },
     { id: "f_milch", label: "Milch" },
@@ -72,8 +73,11 @@ const FOODS = [
     { id: "f_obst", label: "Obst" },
     { id: "f_rindfleisch", label: "Rindfleisch" },
 ];
-const DEFAULT_NEM = ["Zn", "Mg", "Vit C", "Vit D", "Elektrolyte", "Jod", "Cu", "Se", "Vit B", "Bitter"];
-const STORAGE_KEY = "ernaehrungstagebuch:v2";
+const TPL_NEMS = ["Zn", "Mg", "Vit C", "Vit D", "Elektrolyte", "Jod", "Cu", "Se", "Vit B", "Bitter"];
+const STORAGE_V3 = "ernaehrungstagebuch:v3";
+const STORAGE_V2 = "ernaehrungstagebuch:v2";
+let idCounter = 0;
+const newId = () => "c_" + Date.now() + "_" + (idCounter++);
 // ---------- Datum ----------
 const iso = (d) => {
     const y = d.getFullYear();
@@ -90,7 +94,7 @@ const fmtShort = (s) => {
     return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.`;
 };
 const fmtDay = (s) => `${WEEKDAYS[parseISO(s).getDay()]} ${fmtShort(s)}`;
-const addDays = (s, n) => {
+const addDaysISO = (s, n) => {
     const d = parseISO(s);
     return iso(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
 };
@@ -104,6 +108,34 @@ function buildRange(minISO, maxISO) {
     }
     return out;
 }
+function ageLabel(birthdate) {
+    if (!birthdate)
+        return "";
+    const b = parseISO(birthdate);
+    const now = new Date();
+    if (b > now)
+        return "";
+    let months = (now.getFullYear() - b.getFullYear()) * 12 + (now.getMonth() - b.getMonth());
+    if (now.getDate() < b.getDate())
+        months--;
+    if (months <= 0) {
+        const days = Math.floor((now - b) / 86400000);
+        const w = Math.floor(days / 7);
+        return w > 0 ? w + " Wo." : days + " Tage";
+    }
+    if (months < 24)
+        return months + " Mon.";
+    return Math.floor(months / 12) + " J.";
+}
+// ---------- Sortierung ----------
+function sortItems(list) {
+    const hasOrder = list.some((x) => x.order != null);
+    return [...list].sort((a, b) => hasOrder
+        ? (a.order ?? 9999) - (b.order ?? 9999)
+        : a.label.localeCompare(b.label, "de"));
+}
+const visibleOf = (list) => sortItems(list.filter((x) => !x.hidden));
+// ---------- CSV ----------
 function parseCSV(text) {
     text = text.replace(/^\uFEFF/, "");
     const rows = [];
@@ -161,19 +193,40 @@ function parseCSV(text) {
     rows.push(row);
     return rows.filter((r) => !(r.length === 1 && r[0] === ""));
 }
-// ---------- Speicher ----------
-function loadState() {
+// ---------- Speicher / Migration ----------
+function loadStored() {
     try {
-        const v = localStorage.getItem(STORAGE_KEY);
-        if (v)
-            return JSON.parse(v);
+        const v3 = localStorage.getItem(STORAGE_V3);
+        if (v3)
+            return JSON.parse(v3);
+        const v2raw = localStorage.getItem(STORAGE_V2);
+        if (v2raw)
+            return migrateV2(JSON.parse(v2raw));
     }
     catch (e) { }
     return null;
 }
-function saveState(state) {
+function migrateV2(saved) {
+    const customs = (saved.customRows || saved.customCols || []).map((r) => ({ ...r, type: r.type === "sev" ? "sev" : "check" }));
+    const symptoms = [
+        ...TPL_SYMPTOMS.map((t) => ({ ...t, hidden: false, order: null })),
+        ...customs.filter((r) => r.type === "sev").map((r) => ({ id: r.id, label: r.label, type: "sev", hidden: false, order: null })),
+    ];
+    const foods = [
+        ...TPL_FOODS.map((t) => ({ ...t, hidden: false, order: null })),
+        ...customs.filter((r) => r.type !== "sev").map((r) => ({ id: r.id, label: r.label, hidden: false, order: null })),
+    ];
+    const nems = (saved.nemOptions || TPL_NEMS).map((n) => ({ id: n, label: n, hidden: false, order: null }));
+    return {
+        profile: { name: "", gender: "", birthdate: "" },
+        symptoms, foods, nems,
+        entries: saved.entries || {},
+        setupDone: true,
+    };
+}
+function saveStored(state) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem(STORAGE_V3, JSON.stringify(state));
     }
     catch (e) { }
 }
@@ -185,51 +238,102 @@ const ICONS = {
     sun: (cls) => svg(cls, h("circle", { cx: 12, cy: 12, r: 4 }), h("path", { d: "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" })),
     chart: (cls) => svg(cls, h("path", { d: "M4 20V12" }), h("path", { d: "M10 20V5" }), h("path", { d: "M16 20v-6" }), h("path", { d: "M22 20H2" })),
     bulb: (cls) => svg(cls, h("path", { d: "M9.5 18h5" }), h("path", { d: "M10.5 21h3" }), h("path", { d: "M12 3a6 6 0 0 0-3.9 10.6c.6.5 1.4 1.3 1.4 2.4h5c0-1.1.8-1.9 1.4-2.4A6 6 0 0 0 12 3z" })),
-    gear: (cls) => svg(cls, h("circle", { cx: 12, cy: 12, r: 3.2 }), h("path", { d: "M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" })),
+    gear: (cls) => svg(cls, h("circle", { cx: 12, cy: 12, r: 3 }), h("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" })),
+    info: (cls) => svg(cls, h("circle", { cx: 12, cy: 12, r: 9 }), h("path", { d: "M12 11v5" }), h("path", { d: "M12 7.5h.01", strokeWidth: 2.6 })),
     pulse: (cls) => svg(cls, h("polyline", { points: "2 12 7 12 10 5 14 19 17 12 22 12" })),
     apple: (cls) => svg(cls, h("path", { d: "M12 7c-3.2-2.8-8-.8-8 4 0 4.6 3.8 9 8 9s8-4.4 8-9c0-4.8-4.8-6.8-8-4z" }), h("path", { d: "M12 7c0-2.2 1.2-3.5 3-4" })),
     pill: (cls) => svg(cls, h("rect", { x: 3, y: 8.5, width: 18, height: 7, rx: 3.5 }), h("path", { d: "M12 8.5v7" })),
     pencil: (cls) => svg(cls, h("path", { d: "M17 3l4 4L8 20l-5 1 1-5L17 3z" })),
     left: (cls) => svg(cls, h("polyline", { points: "14 5 7 12 14 19" })),
     right: (cls) => svg(cls, h("polyline", { points: "10 5 17 12 10 19" })),
+    up: (cls) => svg(cls, h("polyline", { points: "5 14 12 7 19 14" })),
+    down: (cls) => svg(cls, h("polyline", { points: "5 10 12 17 19 10" })),
+    eye: (cls) => svg(cls, h("path", { d: "M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z" }), h("circle", { cx: 12, cy: 12, r: 3 })),
+    eyeoff: (cls) => svg(cls, h("path", { d: "M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z" }), h("circle", { cx: 12, cy: 12, r: 3 }), h("path", { d: "M4 20 20 4" })),
+    warn: (cls) => svg(cls, h("path", { d: "M12 3 2.5 20h19L12 3z" }), h("path", { d: "M12 9.5V14" }), h("path", { d: "M12 17h.01", strokeWidth: 2.6 })),
 };
+// ---------- Stufen-Slider für Schweregrade ----------
+function StepSlider({ value, onChange }) {
+    const ref = useRef(null);
+    const idx = Math.max(0, SEV_STEPS.indexOf(value || ""));
+    const word = idx > 0 ? SEV_STEPS[idx] : "";
+    const pick = (clientX) => {
+        const r = ref.current.getBoundingClientRect();
+        const rel = (clientX - r.left) / r.width;
+        const i = Math.min(4, Math.max(0, Math.round((rel - 0.1) / 0.2)));
+        onChange(SEV_STEPS[i]);
+    };
+    const pos = (i) => 10 + i * 20;
+    return h("div", null,
+        h("div", {
+            className: "slider",
+            ref,
+            onPointerDown: (e) => { try { ref.current.setPointerCapture(e.pointerId); } catch (_) { } pick(e.clientX); },
+            onPointerMove: (e) => { if (e.buttons) pick(e.clientX); },
+        },
+            h("div", { className: "strack" }),
+            idx > 0 && h("div", { className: "sfill sev-" + word, style: { left: "10%", width: (idx * 20) + "%" } }),
+            [0, 1, 2, 3, 4].map((i) => h("span", { key: i, className: "sdot", style: { left: pos(i) + "%" } })),
+            h("span", { className: "sthumb " + (idx > 0 ? "sev-" + word : "sneutral"), style: { left: pos(idx) + "%" } })),
+        h("div", { className: "sliderlabels" }, ["–", "kein", "bisschen", "mittel", "viel"].map((l, i) => h("span", { key: l, className: i === idx ? "on" : "" }, l))));
+}
 // ================= App =================
 function App() {
+    const [profile, setProfile] = useState({ name: "", gender: "", birthdate: "" });
+    const [symptoms, setSymptoms] = useState([]);
+    const [foods, setFoods] = useState([]);
+    const [nems, setNems] = useState([]);
     const [entries, setEntries] = useState({});
-    const [customRows, setCustomRows] = useState([]);
-    const [nemOptions, setNemOptions] = useState(DEFAULT_NEM);
+    const [setupDone, setSetupDone] = useState(false);
     const [loaded, setLoaded] = useState(false);
     const [view, setView] = useState("day");
     const [selectedDate, setSelectedDate] = useState(iso(new Date()));
     const [modal, setModal] = useState(null);
-    const [editCard, setEditCard] = useState(null); // "sym" | "trig" | "nem" | null
+    const [editCard, setEditCard] = useState(null);
+    // Supabase
+    const [authReady, setAuthReady] = useState(!SUPABASE_ENABLED);
+    const [session, setSession] = useState(null);
+    const [authFailed, setAuthFailed] = useState(false);
+    const sbRef = useRef(null);
+    const pulledRef = useRef(false);
+    const applyingRemote = useRef(false);
+    const syncTimer = useRef(null);
     const firstSave = useRef(true);
     const weekScrollRef = useRef(null);
+    const today = iso(new Date());
     useEffect(() => {
         const r = document.getElementById("root");
         if (r)
             r.setAttribute("data-mounted", "true");
     }, []);
+    // Laden + Migration
     useEffect(() => {
-        (async () => {
-            const saved = await loadState();
-            const today = iso(new Date());
-            let ent = saved?.entries || {};
-            // Alte Einträge ohne type sind Häkchen-Zeilen (Auslöser)
-            const cr = (saved?.customRows || saved?.customCols || []).map((r) => ({ ...r, type: r.type === "sev" ? "sev" : "check" }));
-            const nem = saved?.nemOptions || DEFAULT_NEM;
-            const keys = Object.keys(ent);
-            const min = keys.length ? keys.sort()[0] : today;
-            const range = buildRange(min, today);
-            const next = { ...ent };
-            range.forEach((d) => { if (!next[d])
-                next[d] = emptyDay(); });
-            setEntries(next);
-            setCustomRows(cr);
-            setNemOptions(nem);
-            setLoaded(true);
-        })();
+        const saved = loadStored();
+        if (saved) {
+            applyState(saved);
+            saveStored(saved); // persistiert auch eine frische v2->v3-Migration sofort
+        }
+        else
+            setEntries({ [today]: emptyDay() });
+        setLoaded(true);
     }, []);
+    function applyState(s) {
+        setProfile(s.profile || { name: "", gender: "", birthdate: "" });
+        setSymptoms(s.symptoms || []);
+        setFoods(s.foods || []);
+        setNems(s.nems || []);
+        const ent = { ...(s.entries || {}) };
+        const keys = Object.keys(ent);
+        const min = keys.length ? keys.sort()[0] : today;
+        buildRange(min, today).forEach((d) => { if (!ent[d])
+            ent[d] = emptyDay(); });
+        setEntries(ent);
+        setSetupDone(!!s.setupDone);
+    }
+    function snapshot() {
+        return { profile, symptoms, foods, nems, entries, setupDone };
+    }
+    // Lokal speichern
     useEffect(() => {
         if (!loaded)
             return;
@@ -237,29 +341,83 @@ function App() {
             firstSave.current = false;
             return;
         }
-        saveState({ entries, customRows, nemOptions });
-    }, [entries, customRows, nemOptions, loaded]);
-    // Datums-Chip der Auswahl sichtbar halten
+        saveStored(snapshot());
+    }, [profile, symptoms, foods, nems, entries, setupDone, loaded]);
+    // Supabase initialisieren
     useEffect(() => {
-        if (!loaded || view !== "day")
+        if (!SUPABASE_ENABLED)
+            return;
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
+        s.onload = () => {
+            const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            sbRef.current = client;
+            client.auth.getSession().then(({ data }) => {
+                setSession(data.session || null);
+                setAuthReady(true);
+            });
+            client.auth.onAuthStateChange((event, sess) => {
+                setSession(sess || null);
+                if (event === "PASSWORD_RECOVERY")
+                    setModal({ type: "newpw" });
+                if (event === "SIGNED_OUT")
+                    pulledRef.current = false;
+            });
+        };
+        s.onerror = () => { setAuthFailed(true); setAuthReady(true); };
+        document.head.appendChild(s);
+    }, []);
+    // Nach Login: Server-Stand laden bzw. lokalen hochladen
+    useEffect(() => {
+        if (!SUPABASE_ENABLED || !session || !loaded || pulledRef.current)
+            return;
+        pulledRef.current = true;
+        (async () => {
+            try {
+                const { data } = await sbRef.current.from("journals").select("data").eq("user_id", session.user.id).maybeSingle();
+                if (data && data.data) {
+                    applyingRemote.current = true;
+                    applyState(data.data);
+                }
+                else {
+                    await sbRef.current.from("journals").upsert({ user_id: session.user.id, data: snapshot(), updated_at: new Date().toISOString() });
+                }
+            }
+            catch (e) { }
+        })();
+    }, [session, loaded]);
+    // Debounced Sync nach Supabase
+    useEffect(() => {
+        if (!SUPABASE_ENABLED || !session || !loaded)
+            return;
+        if (applyingRemote.current) {
+            applyingRemote.current = false;
+            return;
+        }
+        clearTimeout(syncTimer.current);
+        syncTimer.current = setTimeout(() => {
+            sbRef.current?.from("journals").upsert({ user_id: session.user.id, data: snapshot(), updated_at: new Date().toISOString() }).then(() => { }, () => { });
+        }, 1500);
+        return () => clearTimeout(syncTimer.current);
+    }, [profile, symptoms, foods, nems, entries, setupDone]);
+    // Datums-Chip sichtbar halten
+    useEffect(() => {
+        if (!loaded || view !== "day" || !setupDone)
             return;
         const el = document.getElementById("chip-" + selectedDate);
         if (el && el.scrollIntoView)
             el.scrollIntoView({ inline: "center", block: "nearest" });
-    }, [selectedDate, view, loaded]);
-    // Verlauf: rechts (heute) starten
+    }, [selectedDate, view, loaded, setupDone]);
+    // Verlauf rechts starten
     useEffect(() => {
         if (loaded && view === "week" && weekScrollRef.current)
             weekScrollRef.current.scrollLeft = weekScrollRef.current.scrollWidth;
     }, [view, loaded]);
     const dates = Object.keys(entries).sort();
-    const today = iso(new Date());
     function emptyDay() {
-        const d = { verstopfung: null, notiz: "", nem: [] };
-        SEV_COLS.forEach((c) => (d[c.id] = ""));
-        FOODS.forEach((f) => (d[f.id] = null));
-        return d;
+        return { notiz: "", nem: [] };
     }
+    // ---------- Eintrags-Handler ----------
     function update(date, id, value) {
         setEntries((p) => ({ ...p, [date]: { ...p[date], [id]: value } }));
     }
@@ -282,80 +440,100 @@ function App() {
         setSelectedDate(d);
         setView("day");
     }
-    function applyAddRow(name, rowType) {
-        setCustomRows((p) => [...p, { id: "c_" + Date.now(), label: name, type: rowType === "sev" ? "sev" : "check" }]);
+    // ---------- Listen-Handler ----------
+    const setters = { sym: setSymptoms, trig: setFoods, nem: setNems };
+    const lists = { sym: symptoms, trig: foods, nem: nems };
+    const visibleSevCount = symptoms.filter((s) => s.type === "sev" && !s.hidden).length;
+    function isLastVisibleSev(item) {
+        return item.type === "sev" && !item.hidden && visibleSevCount <= 1;
     }
-    function applyRenameRow(id, name) {
-        setCustomRows((p) => p.map((r) => (r.id === id ? { ...r, label: name } : r)));
+    function addItem(listName, label, type) {
+        const l = label.trim();
+        if (!l)
+            return;
+        if (listName === "nem") {
+            if (nems.some((x) => x.label === l))
+                return;
+            setNems((p) => [...p, { id: l, label: l, hidden: false, order: null }]);
+        }
+        else if (listName === "sym")
+            setSymptoms((p) => [...p, { id: newId(), label: l, type: type === "check" ? "check" : "sev", hidden: false, order: null }]);
+        else
+            setFoods((p) => [...p, { id: newId(), label: l, hidden: false, order: null }]);
     }
-    function applyDeleteRow(id) {
-        setCustomRows((p) => p.filter((r) => r.id !== id));
+    function renameItem(listName, id, label) {
+        const l = label.trim();
+        if (!l)
+            return;
+        if (listName === "nem") {
+            // NEM: id = Name, Einträge speichern Namen -> beides ummappen
+            setNems((p) => p.map((x) => (x.id === id ? { ...x, id: l, label: l } : x)));
+            setEntries((p) => {
+                const next = {};
+                Object.keys(p).forEach((d) => {
+                    next[d] = { ...p[d], nem: (p[d].nem || []).map((x) => (x === id ? l : x)) };
+                });
+                return next;
+            });
+        }
+        else
+            setters[listName]((p) => p.map((x) => (x.id === id ? { ...x, label: l } : x)));
+    }
+    function deleteItem(listName, id) {
+        setters[listName]((p) => p.filter((x) => x.id !== id));
         setEntries((p) => {
             const next = {};
             Object.keys(p).forEach((d) => {
                 const e = { ...p[d] };
-                delete e[id];
+                if (listName === "nem")
+                    e.nem = (e.nem || []).filter((x) => x !== id);
+                else
+                    delete e[id];
                 next[d] = e;
             });
             return next;
         });
     }
-    function applyRenameNem(oldName, name) {
-        if (name === oldName)
-            return;
-        setNemOptions((p) => p.map((x) => (x === oldName ? name : x)));
-        setEntries((p) => {
-            const next = {};
-            Object.keys(p).forEach((d) => {
-                const e = p[d];
-                next[d] = { ...e, nem: (e.nem || []).map((x) => (x === oldName ? name : x)) };
-            });
-            return next;
-        });
+    function toggleHidden(listName, id) {
+        setters[listName]((p) => p.map((x) => (x.id === id ? { ...x, hidden: !x.hidden } : x)));
     }
-    function applyDeleteNem(name) {
-        setNemOptions((p) => p.filter((x) => x !== name));
-        setEntries((p) => {
-            const next = {};
-            Object.keys(p).forEach((d) => {
-                const e = p[d];
-                next[d] = { ...e, nem: (e.nem || []).filter((x) => x !== name) };
-            });
-            return next;
+    function moveItem(listName, id, dir) {
+        setters[listName]((p) => {
+            const sorted = sortItems(p);
+            const i = sorted.findIndex((x) => x.id === id);
+            const j = i + dir;
+            if (i < 0 || j < 0 || j >= sorted.length)
+                return p;
+            const arr = [...sorted];
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+            return arr.map((x, k) => ({ ...x, order: k }));
         });
-    }
-    function addNemOption(name) {
-        const n = name.trim();
-        if (!n || nemOptions.includes(n))
-            return;
-        setNemOptions((p) => [...p, n]);
     }
     function runModalAction(action, value) {
-        if (action.kind === "addrow")
-            applyAddRow(value, action.rowType);
+        if (action.kind === "addsym")
+            addItem("sym", value, action.symType);
+        if (action.kind === "addfood")
+            addItem("trig", value);
         if (action.kind === "addnem")
-            addNemOption(value);
-        if (action.kind === "renamerow")
-            applyRenameRow(action.id, value);
-        if (action.kind === "delrow")
-            applyDeleteRow(action.id);
-        if (action.kind === "renamenem")
-            applyRenameNem(action.name, value);
-        if (action.kind === "delnem")
-            applyDeleteNem(action.name);
+            addItem("nem", value);
+        if (action.kind === "rename")
+            renameItem(action.list, action.id, value);
+        if (action.kind === "delete")
+            deleteItem(action.list, action.id);
         setModal(null);
     }
+    // ---------- CSV ----------
     function exportCSV() {
+        const symCols = sortItems(symptoms);
+        const foodCols = sortItems(foods);
         const cols = [
             { id: "date", label: "Datum" },
-            ...SEV_COLS,
-            { id: "verstopfung", label: "Kaki" },
-            ...FOODS,
+            ...symCols,
+            ...foodCols,
             { id: "nem", label: "NEM" },
-            ...customRows,
             { id: "notiz", label: "Notizen" },
         ];
-        const sevIds = new Set([...SEV_COLS.map((c) => c.id), ...customRows.filter((r) => r.type === "sev").map((r) => r.id)]);
+        const sevIds = new Set(symptoms.filter((s) => s.type === "sev").map((s) => s.id));
         const esc = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
         const tri = (v) => (v === true ? "ja" : v === false ? "nein" : "");
         const head = cols.map((c) => esc(c.label)).join(",");
@@ -368,15 +546,12 @@ function App() {
                     return esc((e.nem || []).join("; "));
                 if (c.id === "notiz")
                     return esc(e.notiz || "");
-                if (c.id === "verstopfung")
-                    return esc(tri(e.verstopfung));
                 if (sevIds.has(c.id))
                     return esc(e[c.id] || "");
                 return esc(tri(e[c.id]));
             }).join(",");
         });
-        const csv = [head, ...rows].join("\n");
-        setModal({ type: "csv", csv });
+        setModal({ type: "csv", csv: [head, ...rows].join("\n") });
     }
     function importCSV(text) {
         let rows;
@@ -392,49 +567,48 @@ function App() {
         const dateIdx = header.findIndex((x) => x.toLowerCase() === "datum");
         if (dateIdx < 0)
             return { ok: false, msg: 'Spalte "Datum" fehlt – ist das ein Export dieser App?' };
-        const sevByLabel = {};
-        SEV_COLS.forEach((c) => (sevByLabel[c.label] = c.id));
+        const symByLabel = {};
+        symptoms.forEach((s) => (symByLabel[s.label] = s));
         const foodByLabel = {};
-        FOODS.forEach((f) => (foodByLabel[f.label] = f.id));
-        const customByLabel = {};
-        customRows.forEach((c) => (customByLabel[c.label] = c));
-        const newCustom = [];
+        foods.forEach((f) => (foodByLabel[f.label] = f));
+        const newSyms = [], newFoods = [];
         const colDesc = header.map((hd, i) => {
             if (i === dateIdx)
                 return { kind: "date" };
-            if (sevByLabel[hd])
-                return { kind: "sev", id: sevByLabel[hd] };
-            if (hd === "Kaki" || hd === "Verstopfung")
-                return { kind: "check", id: "verstopfung" };
-            if (foodByLabel[hd])
-                return { kind: "check", id: foodByLabel[hd] };
             if (hd === "NEM")
                 return { kind: "nem" };
             if (hd === "Notizen")
                 return { kind: "notiz" };
-            const existing = customByLabel[hd];
-            if (existing)
-                return { kind: existing.type === "sev" ? "sev" : "check", id: existing.id };
-            // Unbekannte Spalte: Enthält sie nur Schweregrad-Wörter, ist es ein Symptom
+            if (hd === "Kaki" || hd === "Verstopfung")
+                return { kind: "check", id: "verstopfung", ensureSym: { id: "verstopfung", label: "Kaki", type: "check" } };
+            const sym = symByLabel[hd];
+            if (sym)
+                return { kind: sym.type === "sev" ? "sev" : "check", id: sym.id };
+            const food = foodByLabel[hd];
+            if (food)
+                return { kind: "check", id: food.id };
+            // Unbekannte Spalte: nur Schweregrad-Wörter -> Symptom (Farbskala), sonst Lebensmittel
             let any = false, allSev = true;
             for (let r = 1; r < rows.length; r++) {
                 const v = (rows[r][i] || "").trim();
                 if (!v)
                     continue;
                 any = true;
-                if (!SEV_WORDS.includes(v)) {
+                if (!SEV_STEPS.includes(v)) {
                     allSev = false;
                     break;
                 }
             }
-            const type = any && allSev ? "sev" : "check";
-            const def = { id: "c_" + Date.now() + "_" + i, label: hd, type };
-            newCustom.push(def);
-            customByLabel[hd] = def;
-            return { kind: type === "sev" ? "sev" : "check", id: def.id };
+            const id = newId();
+            if (any && allSev) {
+                newSyms.push({ id, label: hd, type: "sev", hidden: false, order: null });
+                return { kind: "sev", id };
+            }
+            newFoods.push({ id, label: hd, hidden: false, order: null });
+            return { kind: "check", id };
         });
         const imported = {};
-        const nemSet = new Set(nemOptions);
+        const nemSet = new Set(nems.map((n) => n.label));
         let count = 0;
         for (let r = 1; r < rows.length; r++) {
             const cells = rows[r];
@@ -445,7 +619,7 @@ function App() {
             colDesc.forEach((cd, i) => {
                 const val = (cells[i] !== undefined ? cells[i] : "").trim();
                 if (cd.kind === "sev")
-                    day[cd.id] = SEV_WORDS.includes(val) ? val : "";
+                    day[cd.id] = SEV_STEPS.includes(val) && val ? val : "";
                 else if (cd.kind === "check")
                     day[cd.id] = val.toLowerCase() === "ja" ? true : val.toLowerCase() === "nein" ? false : null;
                 else if (cd.kind === "nem") {
@@ -461,45 +635,86 @@ function App() {
         }
         if (count === 0)
             return { ok: false, msg: "Keine gültigen Tageszeilen gefunden." };
-        setCustomRows((prev) => { const have = new Set(prev.map((c) => c.label)); return [...prev, ...newCustom.filter((c) => !have.has(c.label))]; });
-        setNemOptions([...nemSet]);
+        const kakiDesc = colDesc.find((cd) => cd.ensureSym);
+        setSymptoms((prev) => {
+            let next = prev;
+            if (kakiDesc && !prev.some((s) => s.id === "verstopfung"))
+                next = [...next, { ...kakiDesc.ensureSym, hidden: false, order: null }];
+            const have = new Set(next.map((s) => s.label));
+            return [...next, ...newSyms.filter((s) => !have.has(s.label))];
+        });
+        setFoods((prev) => { const have = new Set(prev.map((f) => f.label)); return [...prev, ...newFoods.filter((f) => !have.has(f.label))]; });
+        setNems((prev) => {
+            const have = new Set(prev.map((n) => n.label));
+            const extra = [...nemSet].filter((n) => !have.has(n)).map((n) => ({ id: n, label: n, hidden: false, order: null }));
+            return [...prev, ...extra];
+        });
         setEntries((prev) => {
             const merged = { ...prev, ...imported };
             const keys = Object.keys(merged).sort();
-            const today2 = iso(new Date());
+            const t = iso(new Date());
             const last = keys[keys.length - 1];
-            const range = buildRange(keys[0], today2 > last ? today2 : last);
-            range.forEach((d) => { if (!merged[d])
+            buildRange(keys[0], t > last ? t : last).forEach((d) => { if (!merged[d])
                 merged[d] = emptyDay(); });
             return merged;
         });
         return { ok: true, msg: count + " Tage importiert. Vorhandene Tage mit gleichem Datum wurden überschrieben." };
     }
-    if (!loaded)
-        return h("div", { className: "loading" }, "Lädt…");
+    // ---------- Rendering ----------
+    if (!loaded || !authReady)
+        return h("div", { className: "loading" }, h(Style, null), "Lädt…");
+    if (SUPABASE_ENABLED && !authFailed && !session)
+        return h("div", { className: "app" }, h(Style, null), h(AuthScreen, { client: sbRef.current }));
+    if (!setupDone)
+        return h("div", { className: "app" }, h(Style, null), h(SetupWizard, {
+            onFinish: (res) => {
+                setProfile(res.profile);
+                setSymptoms(res.symptoms);
+                setFoods(res.foods);
+                setNems(res.nems);
+                setSetupDone(true);
+            },
+        }));
     const e = entries[selectedDate] || emptyDay();
-    const symRows = [...SEV_COLS.map((c) => ({ ...c, type: "sev" })), ...customRows.filter((r) => r.type === "sev").map((r) => ({ ...r, custom: true }))];
-    const trigRows = [...FOODS.map((f) => ({ ...f, type: "check" })), ...customRows.filter((r) => r.type !== "sev").map((r) => ({ ...r, type: "check", custom: true }))];
-    // ---------- Tages-Ansicht ----------
-    function editTap(row, noun) {
-        setModal({ type: "rowedit", rowId: row.id, noun });
+    const visSym = visibleOf(symptoms);
+    const visFoods = visibleOf(foods);
+    const visNems = visibleOf(nems);
+    function openEditSheet(listName, item, noun) {
+        setModal({ type: "rowedit", list: listName, id: item.id, noun });
+    }
+    // Bearbeiten-Liste innerhalb einer Karte
+    function editList(listName, noun) {
+        const all = sortItems(lists[listName]);
+        return h("div", { className: "editlist" },
+            all.map((item, i) => {
+                const lastSevGuard = listName === "sym" && isLastVisibleSev(item);
+                return h("div", { className: "editrow" + (item.hidden ? " hid" : ""), key: item.id },
+                    h("span", { className: "editname" }, item.label, item.type === "check" && listName === "sym" ? h("small", { className: "typetag" }, " ja/nein") : null),
+                    h("span", { className: "editacts" },
+                        h("button", { className: "act", disabled: i === 0, "aria-label": "nach oben", onClick: () => moveItem(listName, item.id, -1) }, ICONS.up("aico")),
+                        h("button", { className: "act", disabled: i === all.length - 1, "aria-label": "nach unten", onClick: () => moveItem(listName, item.id, 1) }, ICONS.down("aico")),
+                        h("button", { className: "act", disabled: lastSevGuard, "aria-label": item.hidden ? "einblenden" : "ausblenden", title: lastSevGuard ? "Mindestens ein Symptom wird für die Analyse gebraucht" : "", onClick: () => toggleHidden(listName, item.id) }, item.hidden ? ICONS.eyeoff("aico") : ICONS.eye("aico")),
+                        h("button", { className: "act", "aria-label": "bearbeiten", onClick: () => openEditSheet(listName, item, noun) }, ICONS.pencil("aico"))));
+            }),
+            h("p", { className: "edithint" }, "↑↓ Reihenfolge · Auge ausblenden (Daten bleiben) · Stift umbenennen/löschen"));
     }
     function dayView() {
         const isToday = selectedDate === today;
         return h("div", { className: "page" },
-            h("div", { className: "datebar" },
-                h("button", { className: "arrowbtn", "aria-label": "Vortag", onClick: () => gotoDate(addDays(selectedDate, -1)) }, ICONS.left("nico")),
-                h("div", { className: "dchips", id: "dchips" }, dates.map((d) => h("button", {
+            h("div", { className: "datebar" + (isToday ? "" : " pastmode") },
+                h("button", { className: "arrowbtn", "aria-label": "Vortag", onClick: () => gotoDate(addDaysISO(selectedDate, -1)) }, ICONS.left("nico")),
+                h("div", { className: "dchips" }, dates.map((d) => h("button", {
                     key: d,
                     id: "chip-" + d,
-                    className: "dchip" + (d === selectedDate ? " sel" : "") + (d === today ? " istoday" : ""),
+                    className: "dchip" + (d === selectedDate ? (d === today ? " sel" : " sel selpast") : "") + (d === today ? " istoday" : ""),
                     onClick: () => gotoDate(d),
                 },
                     h("span", { className: "wd" }, d === today ? "Heute" : WEEKDAYS[parseISO(d).getDay()]),
                     h("span", { className: "dt" }, fmtShort(d))))),
-                h("button", { className: "arrowbtn", "aria-label": "Folgetag", disabled: isToday, onClick: () => !isToday && gotoDate(addDays(selectedDate, 1)) }, ICONS.right("nico"))),
+                h("button", { className: "arrowbtn", "aria-label": "Folgetag", disabled: isToday, onClick: () => !isToday && gotoDate(addDaysISO(selectedDate, 1)) }, ICONS.right("nico"))),
             !isToday && h("div", { className: "jumpbar" },
-                h("span", { className: "jumptxt" }, "Du bearbeitest ", h("strong", null, fmtDay(selectedDate))),
+                ICONS.warn("warnico"),
+                h("span", { className: "jumptxt" }, "Achtung: Du bearbeitest ", h("strong", null, fmtDay(selectedDate)), " — nicht heute!"),
                 h("button", { className: "jumpbtn", onClick: () => gotoDate(today) }, "Zu heute")),
             // --- Symptome ---
             h("section", { className: "card card-sym" },
@@ -507,81 +722,68 @@ function App() {
                 h("div", { className: "cardhead" },
                     h("h2", null, "Symptome"),
                     h("button", { className: "editbtn" + (editCard === "sym" ? " on" : ""), "aria-label": "Symptome bearbeiten", onClick: () => setEditCard(editCard === "sym" ? null : "sym") }, ICONS.pencil("nico"))),
-                editCard === "sym" && h("p", { className: "edithint" }, "Antippen zum Umbenennen oder Löschen (nur eigene Symptome)."),
-                symRows.map((row) => h("div", { className: "symrow", key: row.id },
-                    h("div", { className: "symlabel" },
-                        editCard === "sym" && row.custom
-                            ? h("button", { className: "editable", onClick: () => editTap(row, "Symptom") }, row.label, " ✎")
-                            : h("span", { className: editCard === "sym" && !row.custom ? "dimlabel" : "" }, row.label)),
-                    h("div", { className: "segs" }, SEV_WORDS.map((w) => h("button", {
-                        key: w,
-                        className: "seg seg-" + w + (e[row.id] === w ? " on" : ""),
-                        onClick: () => update(selectedDate, row.id, e[row.id] === w ? "" : w),
-                    }, w))))),
-                h("div", { className: "symrow" },
-                    h("div", { className: "symlabel" }, h("span", null, "Kaki")),
-                    h("div", { className: "segs segs2" }, [["ja", true], ["nein", false]].map(([lab, val]) => h("button", {
-                        key: lab,
-                        className: "seg segneutral" + (e.verstopfung === val ? " on" : ""),
-                        onClick: () => update(selectedDate, "verstopfung", e.verstopfung === val ? null : val),
-                    }, lab)))),
-                h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neues Symptom", placeholder: "z. B. Bauchweh", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "sev" } }) }, "+ Symptom")),
+                editCard === "sym" ? editList("sym", "Symptom") :
+                    visSym.map((row) => h("div", { className: "symrow", key: row.id },
+                        h("div", { className: "symlabel" }, row.label),
+                        row.type === "sev"
+                            ? h(StepSlider, { value: e[row.id] || "", onChange: (v) => update(selectedDate, row.id, v) })
+                            : h("div", { className: "segs segs2" }, [["ja", true], ["nein", false]].map(([lab, val]) => h("button", {
+                                key: lab,
+                                className: "seg segneutral" + (e[row.id] === val ? " on" : ""),
+                                onClick: () => update(selectedDate, row.id, e[row.id] === val ? null : val),
+                            }, lab))))),
+                editCard !== "sym" && h("button", { className: "addchip", onClick: () => setModal({ type: "addsym" }) }, "+ Symptom")),
             // --- Ernährung & Auslöser ---
             h("section", { className: "card card-trig" },
                 ICONS.apple("watermark"),
                 h("div", { className: "cardhead" },
                     h("h2", null, "Ernährung & Auslöser"),
                     h("button", { className: "editbtn" + (editCard === "trig" ? " on" : ""), "aria-label": "Auslöser bearbeiten", onClick: () => setEditCard(editCard === "trig" ? null : "trig") }, ICONS.pencil("nico"))),
-                h("p", { className: "cardsub" }, "Tippen: gegessen ✓ · nicht gegessen – · unbekannt"),
-                editCard === "trig" && h("p", { className: "edithint" }, "Antippen zum Umbenennen oder Löschen (nur eigene Auslöser)."),
-                h("div", { className: "chipgrid" }, trigRows.map((row) => {
-                    const v = e[row.id];
-                    if (editCard === "trig")
-                        return row.custom
-                            ? h("button", { key: row.id, className: "chip editable", onClick: () => editTap(row, "Auslöser") }, row.label + " ✎")
-                            : h("span", { key: row.id, className: "chip lockchip" }, row.label);
-                    const cls = v === true ? " yes" : v === false ? " no" : "";
-                    const mark = v === true ? "✓ " : v === false ? "– " : "";
-                    return h("button", { key: row.id, className: "chip" + cls, onClick: () => cycle(selectedDate, row.id) }, mark + row.label);
-                })),
-                h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neuer Auslöser", placeholder: "z. B. Weizen", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "check" } }) }, "+ Auslöser")),
+                editCard === "trig" ? editList("trig", "Auslöser") :
+                    h(React.Fragment, null,
+                        h("p", { className: "cardsub" }, "Tippen: gegessen ✓ · nicht gegessen (blass) · unbekannt"),
+                        h("div", { className: "chipgrid" }, visFoods.map((row) => {
+                            const v = e[row.id];
+                            const cls = v === true ? " yes" : v === false ? " no" : "";
+                            return h("button", { key: row.id, className: "chip" + cls, onClick: () => cycle(selectedDate, row.id) }, (v === true ? "✓ " : "") + row.label);
+                        })),
+                        h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neuer Auslöser", placeholder: "z. B. Weizen", submitLabel: "Hinzufügen", initial: "", action: { kind: "addfood" } }) }, "+ Auslöser"))),
             // --- NEM ---
             h("section", { className: "card card-nem" },
                 ICONS.pill("watermark"),
                 h("div", { className: "cardhead" },
                     h("h2", null, "NEM"),
                     h("button", { className: "editbtn" + (editCard === "nem" ? " on" : ""), "aria-label": "NEM bearbeiten", onClick: () => setEditCard(editCard === "nem" ? null : "nem") }, ICONS.pencil("nico"))),
-                h("p", { className: "cardsub" }, "Nahrungsergänzung — heute eingenommen?"),
-                editCard === "nem" && h("p", { className: "edithint" }, "Antippen zum Umbenennen oder Löschen."),
-                h("div", { className: "chipgrid" }, nemOptions.map((opt) => {
-                    if (editCard === "nem")
-                        return h("button", { key: opt, className: "chip editable", onClick: () => setModal({ type: "rowedit", nemName: opt, noun: "NEM" }) }, opt + " ✎");
-                    const on = (e.nem || []).includes(opt);
-                    return h("button", { key: opt, className: "chip" + (on ? " yes" : ""), onClick: () => toggleNem(selectedDate, opt) }, (on ? "✓ " : "") + opt);
-                })),
-                h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neues NEM", placeholder: "z. B. Omega 3", submitLabel: "Hinzufügen", initial: "", action: { kind: "addnem" } }) }, "+ NEM")),
+                editCard === "nem" ? editList("nem", "NEM") :
+                    h(React.Fragment, null,
+                        h("p", { className: "cardsub" }, "Nahrungsergänzung — heute eingenommen?"),
+                        h("div", { className: "chipgrid nemgrid" }, visNems.map((row) => {
+                            const on = (e.nem || []).includes(row.label);
+                            return h("button", { key: row.id, className: "chip" + (on ? " yes" : ""), onClick: () => toggleNem(selectedDate, row.label) }, (on ? "✓ " : "") + row.label);
+                        })),
+                        h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neues NEM", placeholder: "z. B. Omega 3", submitLabel: "Hinzufügen", initial: "", action: { kind: "addnem" } }) }, "+ NEM"))),
             // --- Notiz ---
             h("section", { className: "card card-note" },
                 ICONS.pencil("watermark"),
                 h("div", { className: "cardhead" }, h("h2", null, "Notiz")),
                 h("textarea", { className: "notearea", value: e.notiz || "", placeholder: "Freie Notizen zum Tag…", onChange: (ev) => update(selectedDate, "notiz", ev.target.value) })));
     }
-    // ---------- Verlaufs-Ansicht ----------
     function weekView() {
+        const cols = dates;
         const sections = [
-            { key: "sym", label: "Symptome", rows: [...symRows, { id: "verstopfung", label: "Kaki", type: "check" }] },
-            { key: "trig", label: "Ernährung & Auslöser", rows: trigRows },
-            { key: "nem", label: "NEM", rows: nemOptions.map((o) => ({ id: o, label: o, type: "nemopt" })) },
+            { key: "sym", label: "Symptome", rows: visSym },
+            { key: "trig", label: "Ernährung & Auslöser", rows: visFoods.map((f) => ({ ...f, type: "check" })) },
+            { key: "nem", label: "NEM", rows: visNems.map((o) => ({ ...o, type: "nemopt" })) },
             { key: "note", label: "Notizen", rows: [{ id: "notiz", label: "Notiz", type: "notiz" }] },
         ];
         function cellContent(d, row) {
-            const en = entries[d];
+            const en = entries[d] || {};
             if (row.type === "sev") {
                 const v = en[row.id] || "";
                 return h("span", { className: "wsq sev-" + (v || "none") });
             }
             if (row.type === "nemopt")
-                return (en.nem || []).includes(row.id) ? h("span", { className: "wdot" }, "✓") : null;
+                return (en.nem || []).includes(row.label) ? h("span", { className: "wdot" }, "✓") : null;
             if (row.type === "notiz")
                 return en.notiz ? h("span", { className: "wnote" }, "✎") : null;
             const v = en[row.id];
@@ -593,34 +795,26 @@ function App() {
         }
         return h("div", { className: "page" },
             h("div", { className: "weekintro" },
-                h("h2", { className: "pagetitle" }, "Verlauf"),
-                h("p", { className: "pagesub" }, "Nur Übersicht — zum Bearbeiten Tag antippen.")),
-            h("div", { className: "legend" },
-                h("span", { className: "lg lg-kein" }, "kein"),
-                h("span", { className: "lg lg-bisschen" }, "bisschen"),
-                h("span", { className: "lg lg-mittel" }, "mittel"),
-                h("span", { className: "lg lg-viel" }, "viel")),
+                h("h2", { className: "pagetitle" }, "Verlauf")),
             h("div", { className: "wscroll", ref: weekScrollRef },
                 h("table", { className: "wtable" },
                     h("thead", null, h("tr", null,
                         h("th", { className: "wcorner wsticky" }),
-                        dates.map((d) => h("th", { key: d, className: "wday" + (d === today ? " wtoday" : ""), onClick: () => gotoDate(d) },
+                        cols.map((d) => h("th", { key: d, className: "wday" + (d === today ? " wtoday" : ""), onClick: () => gotoDate(d) },
                             h("span", { className: "wdv" },
                                 h("span", { className: "wwd" }, WEEKDAYS[parseISO(d).getDay()]),
-                                "  ",
                                 h("span", { className: "wdt" }, fmtShort(d))))))),
                     h("tbody", null, sections.flatMap((sec) => [
                         h("tr", { key: "h_" + sec.key, className: "wsec wsec-" + sec.key },
-                            h("td", { className: "wseclabel wsticky" }, sec.label),
-                            h("td", { colSpan: dates.length })),
+                            h("td", { colSpan: cols.length + 1, className: "wseccell" },
+                                h("span", { className: "wseclabel" }, sec.label))),
                         ...sec.rows.map((row) => h("tr", { key: sec.key + "_" + row.id },
                             h("td", { className: "wlabel wsticky" }, row.label),
-                            dates.map((d) => h("td", { key: d, className: "wc" + (d === today ? " wtoday" : ""), onClick: () => gotoDate(d) }, cellContent(d, row))))),
+                            cols.map((d) => h("td", { key: d, className: "wc" + (d === today ? " wtoday" : ""), onClick: () => gotoDate(d) }, cellContent(d, row))))),
                     ])))));
     }
-    // ---------- Analyse-Ansicht ----------
     function analysisView() {
-        const a = analyzeStructured(entries, dates, customRows, nemOptions);
+        const a = analyzeStructured(entries, dates, symptoms, foods, nems);
         const maxVal = Math.max(1, ...[...a.suspects, ...a.calm].flatMap((r) => [r.me, r.mu]));
         const bar = (val, cls) => h("div", { className: "barwrap" },
             h("div", { className: "bar " + cls, style: { width: Math.round((val / maxVal) * 100) + "%" } }),
@@ -662,13 +856,16 @@ function App() {
                         h("div", { className: "achips" }, a.notUsed.map((x) => h("span", { className: "achip", key: x }, x))))),
             h("p", { className: "disclaimer" }, "Hinweis: Das sind statistische Muster, keine Beweise. Bei wenigen Tagen oder Lebensmitteln, die immer zusammen gegessen werden, können Scheinzusammenhänge entstehen. Anhaltende Beschwerden, Blut oder Schleim im Stuhl bitte kinderärztlich abklären."));
     }
+    const avatarEmoji = profile.gender === "m" ? "👦" : profile.gender === "w" ? "👧" : "👶";
+    const age = ageLabel(profile.birthdate);
     return h("div", { className: "app" },
         h(Style, null),
         h("header", { className: "topbar" },
-            h("div", { className: "avatar" }, "👶"),
+            h("div", { className: "avatar" }, avatarEmoji),
             h("div", { className: "titles" },
-                h("div", { className: "appname" }, "Ernährungstagebuch"),
-                h("div", { className: "appsub" }, "Gestillt · Reaktionen bis 72 h nachwirkend")),
+                h("div", { className: "appname" }, profile.name || "Ernährungstagebuch"),
+                h("div", { className: "appsub" }, [age, "Gestillt · 72 h berücksichtigt"].filter(Boolean).join(" · "))),
+            h("button", { className: "gearbtn", "aria-label": "Info", onClick: () => setModal({ type: "info" }) }, ICONS.info("nico")),
             h("button", { className: "gearbtn", "aria-label": "Einstellungen", onClick: () => setModal({ type: "settings" }) }, ICONS.gear("nico"))),
         view === "day" && dayView(),
         view === "week" && weekView(),
@@ -682,36 +879,211 @@ function App() {
             className: "navitem" + (view === v ? " active" : ""),
             onClick: () => { setView(v); setEditCard(null); },
         }, icon("navico"), h("span", null, label)))),
+        modal?.type === "info" && h(InfoModal, { onClose: () => setModal(null) }),
         modal?.type === "settings" && h(SettingsModal, {
+            profile,
+            onProfile: setProfile,
             onImport: () => setModal({ type: "import" }),
             onExport: exportCSV,
+            email: session?.user?.email || "",
+            onLogout: SUPABASE_ENABLED && session ? () => { sbRef.current?.auth.signOut(); setModal(null); } : null,
             onClose: () => setModal(null),
         }),
-        modal?.type === "rowedit" && h(RowEditModal, {
-            label: modal.nemName || customRows.find((r) => r.id === modal.rowId)?.label || "",
-            noun: modal.noun,
-            onRename: () => {
-                if (modal.nemName)
-                    setModal({ type: "input", title: "NEM umbenennen", placeholder: "Neuer Name", submitLabel: "Speichern", initial: modal.nemName, action: { kind: "renamenem", name: modal.nemName } });
-                else {
-                    const row = customRows.find((r) => r.id === modal.rowId);
-                    setModal({ type: "input", title: modal.noun + " umbenennen", placeholder: "Neuer Name", submitLabel: "Speichern", initial: row?.label || "", action: { kind: "renamerow", id: modal.rowId } });
-                }
-            },
-            onDelete: () => {
-                if (modal.nemName)
-                    setModal({ type: "confirm", text: "NEM „" + modal.nemName + "“ aus der Liste und allen Tagen entfernen?", submitLabel: "Entfernen", action: { kind: "delnem", name: modal.nemName } });
-                else {
-                    const row = customRows.find((r) => r.id === modal.rowId);
-                    setModal({ type: "confirm", text: modal.noun + " „" + (row?.label || "") + "“ löschen? Alle Einträge dieser Zeile gehen verloren.", submitLabel: "Löschen", action: { kind: "delrow", id: modal.rowId } });
-                }
-            },
+        modal?.type === "addsym" && h(AddSymptomModal, {
+            onSubmit: (label, type) => { addItem("sym", label, type); setModal(null); },
             onClose: () => setModal(null),
         }),
+        modal?.type === "rowedit" && (() => {
+            const item = lists[modal.list].find((x) => x.id === modal.id);
+            if (!item)
+                return null;
+            const guard = modal.list === "sym" && item.type === "sev" && lists.sym.filter((s) => s.type === "sev").length <= 1;
+            return h(RowEditModal, {
+                label: item.label,
+                noun: modal.noun,
+                canDelete: !guard,
+                deleteHint: guard ? "Mindestens ein Symptom mit Farbskala wird für die Analyse gebraucht." : "",
+                onRename: () => setModal({ type: "input", title: modal.noun + " umbenennen", placeholder: "Neuer Name", submitLabel: "Speichern", initial: item.label, action: { kind: "rename", list: modal.list, id: item.id } }),
+                onDelete: () => setModal({ type: "confirm", text: modal.noun + " „" + item.label + "“ löschen? Alle zugehörigen Einträge gehen verloren. (Tipp: Ausblenden behält die Daten.)", submitLabel: "Löschen", action: { kind: "delete", list: modal.list, id: item.id } }),
+                onClose: () => setModal(null),
+            });
+        })(),
         modal?.type === "input" && h(InputModal, { title: modal.title, placeholder: modal.placeholder, submitLabel: modal.submitLabel, initial: modal.initial, onSubmit: (v) => runModalAction(modal.action, v), onClose: () => setModal(null) }),
         modal?.type === "confirm" && h(ConfirmModal, { text: modal.text, submitLabel: modal.submitLabel, onConfirm: () => runModalAction(modal.action), onClose: () => setModal(null) }),
         modal?.type === "import" && h(ImportModal, { onImport: importCSV, onClose: () => setModal(null) }),
-        modal?.type === "csv" && h(CsvModal, { csv: modal.csv, onClose: () => setModal(null) }));
+        modal?.type === "csv" && h(CsvModal, { csv: modal.csv, onClose: () => setModal(null) }),
+        modal?.type === "newpw" && h(NewPasswordModal, { client: sbRef.current, onClose: () => setModal(null) }));
+}
+// ================= Setup-Wizard =================
+function SetupWizard({ onFinish }) {
+    const [step, setStep] = useState(0);
+    const [name, setName] = useState("");
+    const [gender, setGender] = useState("");
+    const [birthdate, setBirthdate] = useState("");
+    const [symSel, setSymSel] = useState(() => Object.fromEntries(TPL_SYMPTOMS.map((t) => [t.id, true])));
+    const [symCustom, setSymCustom] = useState([]);
+    const [foodSel, setFoodSel] = useState(() => Object.fromEntries(TPL_FOODS.map((t) => [t.id, true])));
+    const [foodCustom, setFoodCustom] = useState([]);
+    const [nemSel, setNemSel] = useState(() => Object.fromEntries(TPL_NEMS.map((n) => [n, true])));
+    const [nemCustom, setNemCustom] = useState([]);
+    const [txt, setTxt] = useState("");
+    const [symType, setSymType] = useState("sev");
+    const steps = ["Kind", "Symptome", "Ernährung", "NEM"];
+    const selectedSymCount = TPL_SYMPTOMS.filter((t) => symSel[t.id] && t.type === "sev").length +
+        symCustom.filter((c) => c.type === "sev").length;
+    function addCustom() {
+        const l = txt.trim();
+        if (!l)
+            return;
+        if (step === 1)
+            setSymCustom((p) => [...p, { label: l, type: symType }]);
+        if (step === 2)
+            setFoodCustom((p) => [...p, l]);
+        if (step === 3)
+            setNemCustom((p) => [...p, l]);
+        setTxt("");
+    }
+    function finish() {
+        const symptoms = [
+            ...TPL_SYMPTOMS.filter((t) => symSel[t.id]).map((t) => ({ ...t, hidden: false, order: null })),
+            ...symCustom.map((c) => ({ id: newId(), label: c.label, type: c.type, hidden: false, order: null })),
+        ];
+        const foods = [
+            ...TPL_FOODS.filter((t) => foodSel[t.id]).map((t) => ({ ...t, hidden: false, order: null })),
+            ...foodCustom.map((l) => ({ id: newId(), label: l, hidden: false, order: null })),
+        ];
+        const nems = [
+            ...TPL_NEMS.filter((n) => nemSel[n]),
+            ...nemCustom,
+        ].map((n) => ({ id: n, label: n, hidden: false, order: null }));
+        onFinish({ profile: { name: name.trim(), gender, birthdate }, symptoms, foods, nems });
+    }
+    const canNext = step === 0 ? name.trim().length > 0 : step === 1 ? selectedSymCount > 0 : true;
+    const tplChips = (tpls, sel, setSel, getKey, getLabel) => h("div", { className: "setupgrid" }, tpls.map((t) => {
+        const k = getKey(t);
+        return h("button", {
+            key: k,
+            className: "chip setupchip" + (sel[k] ? " yes" : ""),
+            onClick: () => setSel((p) => ({ ...p, [k]: !p[k] })),
+        }, (sel[k] ? "✓ " : "") + getLabel(t));
+    }));
+    return h("div", { className: "setup" },
+        h("div", { className: "setuphead" },
+            h("div", { className: "setuplogo" }, "🍼"),
+            h("h1", null, "Willkommen!"),
+            h("p", { className: "setupsub" }, "Richte das Ernährungstagebuch einmalig ein.")),
+        h("div", { className: "setupdots" }, steps.map((s, i) => h("span", { key: s, className: "sdot2" + (i === step ? " on" : i < step ? " done" : "") }))),
+        h("section", { className: "setupcard" },
+            h("h2", { className: "setuptitle" }, step === 0 ? "Dein Kind" : step === 1 ? "Welche Symptome willst du tracken?" : step === 2 ? "Welche Lebensmittel isst du regelmäßig?" : "Welche NEM nimmst du?"),
+            step === 0 && h("div", { className: "setupform" },
+                h("label", { className: "flabel" }, "Name"),
+                h("input", { className: "modalinput", value: name, placeholder: "z. B. Mika", onChange: (e) => setName(e.target.value) }),
+                h("label", { className: "flabel" }, "Geschlecht"),
+                h("div", { className: "genderrow" },
+                    h("button", { className: "chip setupchip" + (gender === "m" ? " yes" : ""), onClick: () => setGender("m") }, "👦 Junge"),
+                    h("button", { className: "chip setupchip" + (gender === "w" ? " yes" : ""), onClick: () => setGender("w") }, "👧 Mädchen")),
+                h("label", { className: "flabel" }, "Geburtsdatum"),
+                h("input", { className: "modalinput", type: "date", value: birthdate, onChange: (e) => setBirthdate(e.target.value) })),
+            step === 1 && h(React.Fragment, null,
+                tplChips(TPL_SYMPTOMS, symSel, setSymSel, (t) => t.id, (t) => t.label + (t.type === "check" ? " (ja/nein)" : "")),
+                symCustom.length > 0 && h("div", { className: "setupgrid" }, symCustom.map((c, i) => h("button", { key: i, className: "chip setupchip yes", onClick: () => setSymCustom((p) => p.filter((_, j) => j !== i)) }, "✓ " + c.label + (c.type === "check" ? " (ja/nein)" : "")))),
+                h("div", { className: "typerow" },
+                    h("span", { className: "flabel" }, "Neues Symptom tracken mit:"),
+                    h("button", { className: "chip setupchip" + (symType === "sev" ? " yes" : ""), onClick: () => setSymType("sev") }, "Farbskala"),
+                    h("button", { className: "chip setupchip" + (symType === "check" ? " yes" : ""), onClick: () => setSymType("check") }, "ja/nein")),
+                selectedSymCount === 0 && h("p", { className: "setupwarn" }, "Mindestens ein Symptom mit Farbskala wird für die Analyse gebraucht.")),
+            step === 2 && h(React.Fragment, null,
+                tplChips(TPL_FOODS, foodSel, setFoodSel, (t) => t.id, (t) => t.label),
+                foodCustom.length > 0 && h("div", { className: "setupgrid" }, foodCustom.map((l, i) => h("button", { key: i, className: "chip setupchip yes", onClick: () => setFoodCustom((p) => p.filter((_, j) => j !== i)) }, "✓ " + l)))),
+            step === 3 && h(React.Fragment, null,
+                tplChips(TPL_NEMS, nemSel, setNemSel, (n) => n, (n) => n),
+                nemCustom.length > 0 && h("div", { className: "setupgrid" }, nemCustom.map((l, i) => h("button", { key: i, className: "chip setupchip yes", onClick: () => setNemCustom((p) => p.filter((_, j) => j !== i)) }, "✓ " + l)))),
+            step > 0 && h("div", { className: "addrow" },
+                h("input", { className: "modalinput", value: txt, placeholder: "Eigenes hinzufügen…", onChange: (e) => setTxt(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
+                        addCustom(); } }),
+                h("button", { className: "btn", onClick: addCustom, disabled: !txt.trim() }, "+"))),
+        h("div", { className: "setupnav" },
+            step > 0 ? h("button", { className: "btn", onClick: () => setStep(step - 1) }, "Zurück") : h("span", null),
+            step < 3
+                ? h("button", { className: "btn primary", disabled: !canNext, onClick: () => setStep(step + 1) }, "Weiter")
+                : h("button", { className: "btn primary", disabled: !canNext, onClick: finish }, "Los geht's!")));
+}
+// ================= Auth =================
+function AuthScreen({ client }) {
+    const [mode, setMode] = useState("login");
+    const [email, setEmail] = useState("");
+    const [pw, setPw] = useState("");
+    const [msg, setMsg] = useState(null);
+    const [busy, setBusy] = useState(false);
+    async function submit() {
+        if (!email.trim() || (mode !== "reset" && pw.length < 6)) {
+            setMsg({ ok: false, t: "Bitte E-Mail und Passwort (mind. 6 Zeichen) eingeben." });
+            return;
+        }
+        setBusy(true);
+        setMsg(null);
+        try {
+            if (mode === "login") {
+                const { error } = await client.auth.signInWithPassword({ email: email.trim(), password: pw });
+                if (error)
+                    setMsg({ ok: false, t: error.message.includes("not confirmed") ? "E-Mail noch nicht bestätigt — bitte klicke zuerst den Link in der Bestätigungs-Mail." : "Anmeldung fehlgeschlagen: " + error.message });
+            }
+            else if (mode === "register") {
+                const { data, error } = await client.auth.signUp({ email: email.trim(), password: pw });
+                if (error)
+                    setMsg({ ok: false, t: "Registrierung fehlgeschlagen: " + error.message });
+                else if (!data.session)
+                    setMsg({ ok: true, t: "Fast geschafft! Wir haben dir eine Bestätigungs-E-Mail geschickt. Bitte klicke den Link darin und melde dich danach hier an." });
+            }
+            else {
+                const { error } = await client.auth.resetPasswordForEmail(email.trim(), { redirectTo: location.origin + location.pathname });
+                setMsg(error ? { ok: false, t: error.message } : { ok: true, t: "E-Mail zum Zurücksetzen wurde verschickt." });
+            }
+        }
+        catch (e) {
+            setMsg({ ok: false, t: "Netzwerkfehler — bitte Internetverbindung prüfen." });
+        }
+        setBusy(false);
+    }
+    return h("div", { className: "setup" },
+        h("div", { className: "setuphead" },
+            h("div", { className: "setuplogo" }, "🍼"),
+            h("h1", null, "Ernährungstagebuch"),
+            h("p", { className: "setupsub" }, "Melde dich an, damit deine Daten sicher gespeichert und auf allen Geräten verfügbar sind.")),
+        h("section", { className: "setupcard" },
+            h("div", { className: "authtabs" },
+                h("button", { className: "authtab" + (mode === "login" ? " on" : ""), onClick: () => { setMode("login"); setMsg(null); } }, "Anmelden"),
+                h("button", { className: "authtab" + (mode === "register" ? " on" : ""), onClick: () => { setMode("register"); setMsg(null); } }, "Registrieren")),
+            h("label", { className: "flabel" }, "E-Mail"),
+            h("input", { className: "modalinput", type: "email", autoComplete: "email", value: email, placeholder: "du@beispiel.de", onChange: (e) => setEmail(e.target.value) }),
+            mode !== "reset" && h(React.Fragment, null,
+                h("label", { className: "flabel" }, "Passwort"),
+                h("input", { className: "modalinput", type: "password", autoComplete: mode === "login" ? "current-password" : "new-password", value: pw, placeholder: "mind. 6 Zeichen", onChange: (e) => setPw(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
+                        submit(); } })),
+            msg && h("p", { className: msg.ok ? "okmsg" : "errmsg" }, msg.t),
+            h("button", { className: "btn primary wide", disabled: busy, onClick: submit }, busy ? "Bitte warten…" : mode === "login" ? "Anmelden" : mode === "register" ? "Konto erstellen" : "Link schicken"),
+            mode === "login" && h("button", { className: "linkbtn", onClick: () => { setMode("reset"); setMsg(null); } }, "Passwort vergessen?"),
+            mode === "reset" && h("button", { className: "linkbtn", onClick: () => { setMode("login"); setMsg(null); } }, "Zurück zur Anmeldung"),
+            mode === "register" && h("p", { className: "hint", style: { marginTop: "10px" } }, "Nach der Registrierung bekommst du eine E-Mail mit Bestätigungslink (Double-Opt-In).")));
+}
+function NewPasswordModal({ client, onClose }) {
+    const [pw, setPw] = useState("");
+    const [msg, setMsg] = useState(null);
+    async function save() {
+        if (pw.length < 6) {
+            setMsg({ ok: false, t: "Mindestens 6 Zeichen." });
+            return;
+        }
+        const { error } = await client.auth.updateUser({ password: pw });
+        setMsg(error ? { ok: false, t: error.message } : { ok: true, t: "Passwort gespeichert." });
+        if (!error)
+            setTimeout(onClose, 900);
+    }
+    return h(Sheet, { onClose },
+        h(SheetHead, { title: "Neues Passwort setzen", onClose }),
+        h("input", { className: "modalinput", type: "password", autoFocus: true, value: pw, placeholder: "Neues Passwort", onChange: (e) => setPw(e.target.value) }),
+        msg && h("p", { className: msg.ok ? "okmsg" : "errmsg" }, msg.t),
+        h("button", { className: "btn primary wide", onClick: save }, "Speichern"));
 }
 // ================= Sheets =================
 function Sheet({ onClose, children, className }) {
@@ -725,9 +1097,27 @@ function SheetHead({ title, onClose }) {
         h("strong", null, title),
         h("button", { className: "x", onClick: onClose }, "✕"));
 }
-function SettingsModal({ onImport, onExport, onClose }) {
+function InfoModal({ onClose }) {
+    return h(Sheet, { onClose },
+        h(SheetHead, { title: "Worum geht's hier?", onClose }),
+        h("p", { className: "infotext" }, "Diese App hilft dir, in der Stillzeit Zusammenhänge zwischen deiner Ernährung und den Beschwerden deines Babys zu finden."),
+        h("p", { className: "infotext" }, "Du trägst jeden Tag ein, welche Symptome dein Kind hatte, was du gegessen und welche Nahrungsergänzungsmittel (NEM) du genommen hast. Die Analyse vergleicht dann Tage nach dem Verzehr eines Lebensmittels (bis 72 Stunden nachwirkend) mit Tagen ohne — so werden mögliche Auslöser sichtbar."),
+        h("p", { className: "infotext" }, "Wichtig: Die App liefert Hinweise, keine Diagnosen. Sie ersetzt keine ärztliche oder hebammliche Beratung."),
+        h("button", { className: "btn primary wide", onClick: onClose }, "Alles klar"));
+}
+function SettingsModal({ profile, onProfile, onImport, onExport, email, onLogout, onClose }) {
     return h(Sheet, { onClose },
         h(SheetHead, { title: "Einstellungen", onClose }),
+        h("h4", { className: "settingsec" }, "Kind"),
+        h("label", { className: "flabel" }, "Name"),
+        h("input", { className: "modalinput", value: profile.name, placeholder: "Name des Kindes", onChange: (e) => onProfile({ ...profile, name: e.target.value }) }),
+        h("label", { className: "flabel" }, "Geschlecht"),
+        h("div", { className: "genderrow" },
+            h("button", { className: "chip setupchip" + (profile.gender === "m" ? " yes" : ""), onClick: () => onProfile({ ...profile, gender: "m" }) }, "👦 Junge"),
+            h("button", { className: "chip setupchip" + (profile.gender === "w" ? " yes" : ""), onClick: () => onProfile({ ...profile, gender: "w" }) }, "👧 Mädchen")),
+        h("label", { className: "flabel" }, "Geburtsdatum"),
+        h("input", { className: "modalinput", type: "date", value: profile.birthdate, onChange: (e) => onProfile({ ...profile, birthdate: e.target.value }) }),
+        h("h4", { className: "settingsec" }, "Daten"),
         h("button", { className: "menuitem", onClick: onImport },
             h("span", { className: "mi-ic" }, "📥"),
             h("span", { className: "mi-tx" },
@@ -738,7 +1128,25 @@ function SettingsModal({ onImport, onExport, onClose }) {
             h("span", { className: "mi-tx" },
                 h("strong", null, "Export (CSV)"),
                 h("small", null, "Alle Daten als Text / Datei sichern"))),
-        h("p", { className: "hint" }, "Alle Daten bleiben lokal auf diesem Gerät gespeichert."));
+        onLogout
+            ? h(React.Fragment, null,
+                h("h4", { className: "settingsec" }, "Konto"),
+                h("p", { className: "hint" }, "Angemeldet als " + email + " — Daten werden mit deinem Konto synchronisiert."),
+                h("button", { className: "btn wide danger", onClick: onLogout }, "Abmelden"))
+            : h("p", { className: "hint" }, "Alle Daten bleiben lokal auf diesem Gerät gespeichert."));
+}
+function AddSymptomModal({ onSubmit, onClose }) {
+    const [txt, setTxt] = useState("");
+    const [type, setType] = useState("sev");
+    return h(Sheet, { onClose },
+        h(SheetHead, { title: "Neues Symptom", onClose }),
+        h("input", { className: "modalinput", autoFocus: true, value: txt, placeholder: "z. B. Bauchweh", onChange: (e) => setTxt(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && txt.trim())
+                onSubmit(txt.trim(), type); } }),
+        h("label", { className: "flabel" }, "Wie tracken?"),
+        h("div", { className: "genderrow" },
+            h("button", { className: "chip setupchip" + (type === "sev" ? " yes" : ""), onClick: () => setType("sev") }, "Farbskala (kein–viel)"),
+            h("button", { className: "chip setupchip" + (type === "check" ? " yes" : ""), onClick: () => setType("check") }, "ja/nein")),
+        h("button", { className: "btn primary wide", disabled: !txt.trim(), onClick: () => onSubmit(txt.trim(), type) }, "Hinzufügen"));
 }
 function InputModal({ title, placeholder, submitLabel, initial, onSubmit, onClose }) {
     const [txt, setTxt] = useState(initial || "");
@@ -757,11 +1165,12 @@ function ConfirmModal({ text, submitLabel, onConfirm, onClose }) {
         h("button", { className: "btn wide danger", onClick: onConfirm }, submitLabel),
         h("button", { className: "btn wide", onClick: onClose }, "Abbrechen"));
 }
-function RowEditModal({ label, noun, onRename, onDelete, onClose }) {
+function RowEditModal({ label, noun, canDelete, deleteHint, onRename, onDelete, onClose }) {
     return h(Sheet, { onClose },
         h(SheetHead, { title: label, onClose }),
         h("button", { className: "btn wide", onClick: onRename }, "Umbenennen"),
-        h("button", { className: "btn wide danger", onClick: onDelete }, (noun || "Eintrag") + " löschen"));
+        h("button", { className: "btn wide danger", disabled: !canDelete, onClick: canDelete ? onDelete : undefined }, (noun || "Eintrag") + " löschen"),
+        !canDelete && deleteHint && h("p", { className: "hint" }, deleteHint));
 }
 function ImportModal({ onImport, onClose }) {
     const [txt, setTxt] = useState("");
@@ -815,14 +1224,13 @@ function CsvModal({ csv, onClose }) {
         h("a", { className: "btn wide dl", href: dataUrl, download: `ernaehrungstagebuch_${iso(new Date())}.csv` }, "Als Datei laden (falls unterstützt)"));
 }
 // ================= Analyse =================
-function analyzeStructured(entries, orderedDates, customRows, nemOptions) {
+function analyzeStructured(entries, orderedDates, symptoms, foods, nems) {
     // Alle NEM, die irgendwo eingetragen wurden (auch bereits gelöschte Optionen)
-    const nemUsed = new Set(nemOptions);
-    orderedDates.forEach((d) => (entries[d].nem || []).forEach((x) => nemUsed.add(x)));
-    const sevRows = [...SEV_COLS, ...customRows.filter((r) => r.type === "sev")];
+    const nemUsed = new Set(nems.map((n) => n.label));
+    orderedDates.forEach((d) => ((entries[d] || {}).nem || []).forEach((x) => nemUsed.add(x)));
+    const sevRows = symptoms.filter((s) => s.type === "sev");
     const inputCols = [
-        ...FOODS.map((f) => ({ id: f.id, label: f.label, kind: "check" })),
-        ...customRows.filter((r) => r.type !== "sev").map((c) => ({ id: c.id, label: c.label, kind: "check" })),
+        ...foods.map((f) => ({ id: f.id, label: f.label, kind: "check" })),
         ...[...nemUsed].map((n) => ({ id: n, label: "NEM: " + n, kind: "nem" })),
     ];
     const load = {}, hasData = {}, constip = {}, idx = {};
@@ -846,11 +1254,12 @@ function analyzeStructured(entries, orderedDates, customRows, nemOptions) {
     inputCols.forEach((col) => {
         const consumed = new Set();
         orderedDates.forEach((d) => {
+            const e = entries[d] || {};
             if (col.kind === "nem") {
-                if ((entries[d].nem || []).includes(col.id))
+                if ((e.nem || []).includes(col.id))
                     consumed.add(d);
             }
-            else if (entries[d][col.id] === true)
+            else if (e[col.id] === true)
                 consumed.add(d);
         });
         if (consumed.size === 0) {
@@ -901,25 +1310,26 @@ function Style() {
         --bg: #141b2b; --surface: #1d2637; --surface2: #28334a; --line: #324058;
         --ink: #f2f5fa; --mut: #8b96ab;
         --lime: #c3d63f; --lime-ink: #232b0a;
+        --amber: #f59e0b; --amber-ink: #3a2503;
         --c-sym: #e8794a; --c-sym-deep: #8a3a17;
         --c-trig: #4fb8dd; --c-trig-deep: #0d5e80;
         --c-nem: #56c778; --c-nem-deep: #14602f;
         --c-note: #8f86e8; --c-note-deep: #3d34a0;
-        --sev-kein: #4ade80; --sev-bisschen: #a3e635; --sev-mittel: #fb923c; --sev-viel: #ef4444;
+        --sev-kein: #4ade80; --sev-bisschen: #fbbf24; --sev-mittel: #fb923c; --sev-viel: #ef4444;
       }
       * { box-sizing: border-box; }
       .app { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink);
         background: var(--bg); min-height: 100vh; padding-bottom: calc(78px + env(safe-area-inset-bottom));
         -webkit-text-size-adjust: 100%; max-width: 560px; margin: 0 auto; }
-      .loading { padding: 40px; text-align: center; color: var(--mut); background: var(--bg); min-height: 100vh; }
-      button { -webkit-tap-highlight-color: transparent; }
+      .loading { padding: 40px; text-align: center; color: var(--mut); background: var(--bg); min-height: 100vh; font-family: -apple-system, sans-serif; }
+      button { -webkit-tap-highlight-color: transparent; font-family: inherit; }
 
       .topbar { display: flex; align-items: center; gap: 11px; padding: 14px 16px 6px; }
-      .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 20px; flex: 0 0 auto; }
+      .avatar { width: 42px; height: 42px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 22px; flex: 0 0 auto; }
       .titles { flex: 1; min-width: 0; }
-      .appname { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+      .appname { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .appsub { font-size: 11.5px; color: var(--mut); margin-top: 1px; }
-      .gearbtn { border: none; background: var(--surface2); color: var(--mut); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+      .gearbtn { border: none; background: var(--surface2); color: var(--mut); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
       .nico { width: 20px; height: 20px; }
 
       .page { padding: 2px 0 8px; }
@@ -937,10 +1347,14 @@ function Style() {
       .dchip.istoday .wd { color: var(--lime); }
       .dchip.sel { background: var(--lime); border-color: var(--lime); }
       .dchip.sel .wd, .dchip.sel .dt { color: var(--lime-ink); }
+      .dchip.sel.selpast { background: var(--amber); border-color: var(--amber); }
+      .dchip.sel.selpast .wd, .dchip.sel.selpast .dt { color: var(--amber-ink); }
 
-      .jumpbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 12px 0; background: var(--surface); border-radius: 14px; padding: 9px 12px; font-size: 12.5px; color: var(--mut); }
-      .jumpbar strong { color: var(--ink); }
-      .jumpbtn { border: 1.5px solid var(--lime); color: var(--lime); background: transparent; border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 800; cursor: pointer; }
+      .jumpbar { display: flex; align-items: center; gap: 10px; margin: 10px 12px 0; background: var(--amber); border-radius: 14px; padding: 10px 12px; font-size: 12.5px; color: var(--amber-ink); font-weight: 600; }
+      .jumpbar strong { font-weight: 800; }
+      .warnico { width: 20px; height: 20px; flex: 0 0 auto; }
+      .jumptxt { flex: 1; }
+      .jumpbtn { border: none; color: var(--amber); background: var(--amber-ink); border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 800; cursor: pointer; flex: 0 0 auto; }
 
       /* Karten */
       .card { position: relative; overflow: hidden; border-radius: 24px; padding: 16px 16px 18px; margin: 12px 12px 0; color: #fff; }
@@ -952,33 +1366,52 @@ function Style() {
       .cardhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       .card h2 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -0.01em; }
       .cardsub { margin: 4px 0 0; font-size: 12px; color: rgba(255,255,255,.75); position: relative; }
-      .edithint { margin: 8px 0 0; font-size: 12px; color: rgba(255,255,255,.9); background: rgba(0,0,0,.18); border-radius: 10px; padding: 6px 10px; position: relative; }
       .editbtn { border: none; background: rgba(0,0,0,.18); color: rgba(255,255,255,.85); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
       .editbtn.on { background: #fff; color: #333; }
       .editbtn .nico { width: 16px; height: 16px; }
 
-      /* Symptome: Segmente */
+      /* Bearbeiten-Liste */
+      .editlist { margin-top: 10px; position: relative; }
+      .editrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: rgba(0,0,0,.18); border-radius: 12px; padding: 7px 8px 7px 12px; margin-top: 6px; }
+      .editrow.hid { opacity: .45; }
+      .editname { font-size: 13.5px; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .typetag { font-weight: 600; opacity: .7; font-size: 10.5px; }
+      .editacts { display: flex; gap: 4px; flex: 0 0 auto; }
+      .act { border: none; background: rgba(255,255,255,.16); color: #fff; width: 29px; height: 29px; border-radius: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+      .act:disabled { opacity: .3; cursor: default; }
+      .aico { width: 15px; height: 15px; }
+      .edithint { margin: 8px 0 0; font-size: 11.5px; color: rgba(255,255,255,.85); position: relative; }
+
+      /* Symptome: Slider */
       .symrow { margin-top: 13px; position: relative; }
-      .symlabel { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
-      .symlabel .editable { border: none; background: rgba(0,0,0,.18); color: #fff; font: inherit; border-radius: 999px; padding: 3px 10px; cursor: pointer; }
-      .dimlabel { opacity: .85; }
-      .segs { display: flex; gap: 3px; background: rgba(0,0,0,.22); border-radius: 999px; padding: 3px; }
+      .symlabel { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
+      .slider { position: relative; height: 34px; touch-action: pan-y; cursor: pointer; }
+      .strack { position: absolute; top: 50%; left: 6%; right: 6%; height: 4px; border-radius: 2px; background: rgba(0,0,0,.28); transform: translateY(-50%); }
+      .sfill { position: absolute; top: 50%; height: 4px; border-radius: 2px; transform: translateY(-50%); opacity: .8; }
+      .sdot { position: absolute; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: rgba(0,0,0,.34); transform: translate(-50%,-50%); }
+      .sthumb { position: absolute; top: 50%; width: 22px; height: 22px; border-radius: 50%; transform: translate(-50%,-50%); box-shadow: 0 2px 6px rgba(0,0,0,.35); transition: left .12s ease; }
+      .sthumb.sneutral { background: var(--surface2); border: 2px solid rgba(255,255,255,.7); }
+      .sfill.sev-kein, .sthumb.sev-kein { background: var(--sev-kein); }
+      .sfill.sev-bisschen, .sthumb.sev-bisschen { background: var(--sev-bisschen); }
+      .sfill.sev-mittel, .sthumb.sev-mittel { background: var(--sev-mittel); }
+      .sfill.sev-viel, .sthumb.sev-viel { background: var(--sev-viel); }
+      .sliderlabels { display: flex; margin-top: -2px; }
+      .sliderlabels span { flex: 1; text-align: center; font-size: 10px; font-weight: 700; color: rgba(255,255,255,.6); }
+      .sliderlabels span.on { color: #fff; font-weight: 800; }
+
+      .segs { display: flex; gap: 3px; background: rgba(0,0,0,.22); border-radius: 999px; padding: 3px; margin-top: 6px; }
       .segs2 { max-width: 220px; }
       .seg { flex: 1; border: none; background: transparent; color: rgba(255,255,255,.8); font-size: 12.5px; font-weight: 700; padding: 8px 0; border-radius: 999px; cursor: pointer; }
-      .seg.on.seg-kein { background: var(--sev-kein); color: #0b3018; }
-      .seg.on.seg-bisschen { background: var(--sev-bisschen); color: #2c3a08; }
-      .seg.on.seg-mittel { background: var(--sev-mittel); color: #4a1e02; }
-      .seg.on.seg-viel { background: var(--sev-viel); color: #fff; }
       .seg.segneutral.on { background: #fff; color: #333; }
 
       /* Chips */
       .chipgrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; position: relative; }
+      .nemgrid { display: grid; grid-template-columns: 1fr 1fr; }
+      .nemgrid .chip { width: 100%; text-align: left; }
       .chip { border: 1.5px solid rgba(255,255,255,.55); background: transparent; color: #fff; border-radius: 999px; padding: 9px 14px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
       .card-trig .chip.yes { background: #fff; border-color: #fff; color: var(--c-trig-deep); }
       .card-nem .chip.yes { background: #fff; border-color: #fff; color: var(--c-nem-deep); }
-      .chip.no { background: rgba(0,0,0,.25); border-color: transparent; color: rgba(255,255,255,.6); text-decoration: line-through; }
-      .chip.editable { border-style: solid; background: rgba(0,0,0,.18); border-color: transparent; }
-      .chip.lockchip { opacity: .45; border-style: solid; }
+      .chip.no { opacity: .38; border-color: rgba(255,255,255,.35); }
       .addchip { margin-top: 14px; border: 1.5px dashed rgba(255,255,255,.6); background: transparent; color: #fff; border-radius: 999px; padding: 9px 16px; font-size: 13.5px; font-weight: 800; cursor: pointer; position: relative; }
 
       /* Notiz */
@@ -991,27 +1424,22 @@ function Style() {
       .weekintro { padding: 10px 16px 0; }
       .pagetitle { margin: 0; font-size: 21px; font-weight: 800; }
       .pagesub { margin: 3px 0 0; font-size: 12.5px; color: var(--mut); }
-      .legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 16px 0; font-size: 11px; }
-      .lg { padding: 2px 9px; border-radius: 20px; font-weight: 700; }
-      .lg-kein { background: var(--sev-kein); color: #0b3018; }
-      .lg-bisschen { background: var(--sev-bisschen); color: #2c3a08; }
-      .lg-mittel { background: var(--sev-mittel); color: #4a1e02; }
-      .lg-viel { background: var(--sev-viel); color: #fff; }
       .wscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 10px 12px 0; border-radius: 18px; background: var(--surface); }
       .wtable { border-collapse: separate; border-spacing: 0; }
       .wsticky { position: sticky; left: 0; background: var(--surface); z-index: 2; }
-      .wcorner { min-width: 104px; width: 104px; border-bottom: 1px solid var(--line); }
+      .wcorner { border-bottom: 1px solid var(--line); }
       .wday { min-width: 34px; width: 34px; padding: 6px 0 5px; border-bottom: 1px solid var(--line); vertical-align: bottom; cursor: pointer; }
       .wdv { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; display: inline-block; line-height: 1; }
-      .wwd { font-size: 10px; font-weight: 700; color: var(--mut); }
+      .wwd { font-size: 10px; font-weight: 700; color: var(--mut); display: inline-block; inline-size: 2.2em; }
       .wdt { font-size: 11px; font-weight: 700; color: var(--ink); margin-top: 3px; }
       .wday.wtoday .wwd, .wday.wtoday .wdt { color: var(--lime); }
-      .wseclabel { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 8px 12px 4px; white-space: nowrap; }
+      .wseccell { padding: 8px 0 4px; }
+      .wseclabel { position: sticky; left: 12px; display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
       .wsec-sym .wseclabel { color: var(--c-sym); }
       .wsec-trig .wseclabel { color: var(--c-trig); }
       .wsec-nem .wseclabel { color: var(--c-nem); }
       .wsec-note .wseclabel { color: var(--c-note); }
-      .wlabel { font-size: 12px; font-weight: 600; padding: 0 12px; white-space: nowrap; height: 32px; border-right: 1px solid var(--line); min-width: 104px; width: 104px; }
+      .wlabel { font-size: 12px; font-weight: 600; padding: 0 10px 0 12px; white-space: nowrap; height: 32px; border-right: 1px solid var(--line); max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
       .wc { text-align: center; vertical-align: middle; height: 32px; min-width: 34px; cursor: pointer; border-bottom: 1px solid rgba(50,64,88,.35); }
       .wc.wtoday { background: rgba(195,214,63,.07); }
       .wsq { display: inline-block; width: 17px; height: 17px; border-radius: 6px; }
@@ -1055,9 +1483,40 @@ function Style() {
       .navico { width: 23px; height: 23px; }
       .navitem.active { color: var(--lime); }
 
+      /* Setup & Auth */
+      .setup { min-height: 100vh; padding: 26px 16px calc(20px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); max-width: 560px; margin: 0 auto; }
+      .setuphead { text-align: center; }
+      .setuplogo { font-size: 44px; }
+      .setuphead h1 { margin: 6px 0 0; font-size: 24px; font-weight: 800; }
+      .setupsub { margin: 6px 0 0; font-size: 13.5px; color: var(--mut); }
+      .setupdots { display: flex; justify-content: center; gap: 8px; margin: 18px 0 4px; }
+      .sdot2 { width: 9px; height: 9px; border-radius: 50%; background: var(--surface2); }
+      .sdot2.on { background: var(--lime); }
+      .sdot2.done { background: rgba(195,214,63,.45); }
+      .setupcard { background: var(--surface); border-radius: 22px; padding: 18px 16px; margin-top: 12px; }
+      .setuptitle { margin: 0 0 12px; font-size: 16.5px; font-weight: 800; }
+      .setupform .flabel { margin-top: 12px; }
+      .flabel { display: block; font-size: 12px; font-weight: 700; color: var(--mut); margin: 10px 0 5px; }
+      .genderrow { display: flex; gap: 8px; }
+      .typerow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+      .typerow .flabel { margin: 0; }
+      .setupgrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+      .setupgrid + .setupgrid { margin-top: 8px; }
+      .setupchip { border-color: var(--line); color: var(--ink); }
+      .setupchip.yes { background: var(--lime); border-color: var(--lime); color: var(--lime-ink); }
+      .setupwarn { margin: 10px 0 0; font-size: 12.5px; color: #ffb27d; font-weight: 600; }
+      .setupnav { display: flex; justify-content: space-between; gap: 10px; margin-top: 14px; }
+      .setupnav .btn { min-width: 110px; padding: 13px; }
+      .addrow { display: flex; gap: 6px; margin-top: 12px; }
+      .addrow .modalinput { flex: 1; }
+      .authtabs { display: flex; background: var(--surface2); border-radius: 999px; padding: 3px; margin-bottom: 6px; }
+      .authtab { flex: 1; border: none; background: transparent; color: var(--mut); font-size: 13.5px; font-weight: 800; padding: 9px 0; border-radius: 999px; cursor: pointer; }
+      .authtab.on { background: var(--lime); color: var(--lime-ink); }
+      .linkbtn { border: none; background: transparent; color: var(--mut); font-size: 12.5px; font-weight: 700; margin-top: 12px; cursor: pointer; text-decoration: underline; width: 100%; }
+
       /* Sheets */
       .sheet-bg { position: fixed; inset: 0; background: rgba(5,8,15,.6); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
-      .sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 460px; border-radius: 20px 20px 0 0; padding: 10px 16px 20px; box-shadow: 0 -8px 30px rgba(0,0,0,.4); animation: up .18s ease; }
+      .sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto; border-radius: 20px 20px 0 0; padding: 10px 16px 20px; box-shadow: 0 -8px 30px rgba(0,0,0,.4); animation: up .18s ease; }
       .grab { width: 38px; height: 4px; border-radius: 2px; background: var(--surface2); margin: 2px auto 10px; }
       @keyframes up { from { transform: translateY(20px); opacity: .6 } to { transform: none; opacity: 1 } }
       .sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 15px; }
@@ -1068,12 +1527,14 @@ function Style() {
       .btn.wide { width: 100%; margin-top: 10px; padding: 13px; }
       .btn.danger { color: #ff8f8f; border-color: #5c3038; background: transparent; }
       .btn:disabled { opacity: .45; cursor: default; }
+      .settingsec { margin: 16px 0 4px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); }
       .menuitem { display: flex; align-items: center; gap: 12px; width: 100%; border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: 16px; padding: 13px; margin-bottom: 8px; cursor: pointer; text-align: left; }
       .mi-ic { font-size: 20px; }
       .mi-tx { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
       .mi-tx small { color: var(--mut); font-size: 12px; }
       .hint { font-size: 12.5px; color: var(--mut); margin: 4px 0 10px; }
-      .modalinput { width: 100%; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); border-radius: 12px; padding: 12px; font-size: 15px; }
+      .infotext { font-size: 13.5px; line-height: 1.55; color: var(--ink); margin: 0 0 10px; }
+      .modalinput { width: 100%; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); border-radius: 12px; padding: 12px; font-size: 15px; font-family: inherit; }
       .modalinput::placeholder { color: var(--mut); }
       .confirmtext { font-size: 14px; color: var(--ink); margin: 0 0 4px; line-height: 1.45; }
       .csvbox { width: 100%; height: 150px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: pre; background: var(--surface2); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
