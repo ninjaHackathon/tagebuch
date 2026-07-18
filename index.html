@@ -3,15 +3,16 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#141b2b" />
 <title>Ernährungstagebuch</title>
-<style> html, body, #root { height: 100%; } body { margin: 0; } </style>
+<style> html, body, #root { height: 100%; } body { margin: 0; background: #141b2b; } </style>
 <script>
   function showError(msg) {
     var el = document.getElementById("root");
     if (!el) return;
-    el.innerHTML = '<div style="font-family:-apple-system,sans-serif;padding:20px;color:#9a1414;white-space:pre-wrap;line-height:1.5;font-size:14px;">' +
+    el.innerHTML = '<div style="font-family:-apple-system,sans-serif;padding:20px;color:#ff9d9d;white-space:pre-wrap;line-height:1.5;font-size:14px;">' +
       '<strong>Fehler beim Laden</strong><br><br>' + msg +
-      '<br><br><span style="color:#6b7472;">Bitte Screenshot davon schicken.</span></div>';
+      '<br><br><span style="color:#8b96ab;">Bitte Screenshot davon schicken.</span></div>';
   }
   window.addEventListener("error", function (e) {
     if (e && e.target && e.target.tagName === "SCRIPT") {
@@ -28,7 +29,7 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 </head>
 <body>
-<div id="root"><div style="font-family:-apple-system,sans-serif;padding:24px;color:#6b7472;">Lädt Ernährungstagebuch …</div></div>
+<div id="root"><div style="font-family:-apple-system,sans-serif;padding:24px;color:#8b96ab;">Lädt Ernährungstagebuch …</div></div>
 <script>
   setTimeout(function () {
     var el = document.getElementById("root");
@@ -40,6 +41,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useRef } = React;
+const h = React.createElement;
 // ---------- Konfiguration ----------
 const WEEKDAYS = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 const SEV_OPTIONS = [
@@ -49,6 +51,7 @@ const SEV_OPTIONS = [
     { v: "mittel", label: "mittel", n: 2 },
     { v: "viel", label: "viel", n: 3 },
 ];
+const SEV_WORDS = ["kein", "bisschen", "mittel", "viel"];
 const sevVal = (v) => {
     const o = SEV_OPTIONS.find((x) => x.v === v);
     return o ? o.n : null;
@@ -85,6 +88,11 @@ const parseISO = (s) => {
 const fmtShort = (s) => {
     const d = parseISO(s);
     return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.`;
+};
+const fmtDay = (s) => `${WEEKDAYS[parseISO(s).getDay()]} ${fmtShort(s)}`;
+const addDays = (s, n) => {
+    const d = parseISO(s);
+    return iso(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
 };
 function buildRange(minISO, maxISO) {
     const out = [];
@@ -169,16 +177,34 @@ function saveState(state) {
     }
     catch (e) { }
 }
+// ---------- Icons (Inline-SVG) ----------
+function svg(cls, ...children) {
+    return h("svg", { className: cls, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true }, ...children);
+}
+const ICONS = {
+    sun: (cls) => svg(cls, h("circle", { cx: 12, cy: 12, r: 4 }), h("path", { d: "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" })),
+    chart: (cls) => svg(cls, h("path", { d: "M4 20V12" }), h("path", { d: "M10 20V5" }), h("path", { d: "M16 20v-6" }), h("path", { d: "M22 20H2" })),
+    bulb: (cls) => svg(cls, h("path", { d: "M9.5 18h5" }), h("path", { d: "M10.5 21h3" }), h("path", { d: "M12 3a6 6 0 0 0-3.9 10.6c.6.5 1.4 1.3 1.4 2.4h5c0-1.1.8-1.9 1.4-2.4A6 6 0 0 0 12 3z" })),
+    gear: (cls) => svg(cls, h("circle", { cx: 12, cy: 12, r: 3.2 }), h("path", { d: "M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" })),
+    pulse: (cls) => svg(cls, h("polyline", { points: "2 12 7 12 10 5 14 19 17 12 22 12" })),
+    apple: (cls) => svg(cls, h("path", { d: "M12 7c-3.2-2.8-8-.8-8 4 0 4.6 3.8 9 8 9s8-4.4 8-9c0-4.8-4.8-6.8-8-4z" }), h("path", { d: "M12 7c0-2.2 1.2-3.5 3-4" })),
+    pill: (cls) => svg(cls, h("rect", { x: 3, y: 8.5, width: 18, height: 7, rx: 3.5 }), h("path", { d: "M12 8.5v7" })),
+    pencil: (cls) => svg(cls, h("path", { d: "M17 3l4 4L8 20l-5 1 1-5L17 3z" })),
+    left: (cls) => svg(cls, h("polyline", { points: "14 5 7 12 14 19" })),
+    right: (cls) => svg(cls, h("polyline", { points: "10 5 17 12 10 19" })),
+};
 // ================= App =================
 function App() {
     const [entries, setEntries] = useState({});
     const [customRows, setCustomRows] = useState([]);
     const [nemOptions, setNemOptions] = useState(DEFAULT_NEM);
     const [loaded, setLoaded] = useState(false);
+    const [view, setView] = useState("day");
+    const [selectedDate, setSelectedDate] = useState(iso(new Date()));
     const [modal, setModal] = useState(null);
-    const [analysis, setAnalysis] = useState(null);
+    const [editCard, setEditCard] = useState(null); // "sym" | "trig" | "nem" | null
     const firstSave = useRef(true);
-    const scrollRef = useRef(null);
+    const weekScrollRef = useRef(null);
     useEffect(() => {
         const r = document.getElementById("root");
         if (r)
@@ -189,7 +215,8 @@ function App() {
             const saved = await loadState();
             const today = iso(new Date());
             let ent = saved?.entries || {};
-            const cr = saved?.customRows || saved?.customCols || [];
+            // Alte Einträge ohne type sind Häkchen-Zeilen (Auslöser)
+            const cr = (saved?.customRows || saved?.customCols || []).map((r) => ({ ...r, type: r.type === "sev" ? "sev" : "check" }));
             const nem = saved?.nemOptions || DEFAULT_NEM;
             const keys = Object.keys(ent);
             const min = keys.length ? keys.sort()[0] : today;
@@ -212,13 +239,21 @@ function App() {
         }
         saveState({ entries, customRows, nemOptions });
     }, [entries, customRows, nemOptions, loaded]);
+    // Datums-Chip der Auswahl sichtbar halten
     useEffect(() => {
-        if (loaded && scrollRef.current) {
-            scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
-        }
-    }, [loaded]);
+        if (!loaded || view !== "day")
+            return;
+        const el = document.getElementById("chip-" + selectedDate);
+        if (el && el.scrollIntoView)
+            el.scrollIntoView({ inline: "center", block: "nearest" });
+    }, [selectedDate, view, loaded]);
+    // Verlauf: rechts (heute) starten
+    useEffect(() => {
+        if (loaded && view === "week" && weekScrollRef.current)
+            weekScrollRef.current.scrollLeft = weekScrollRef.current.scrollWidth;
+    }, [view, loaded]);
     const dates = Object.keys(entries).sort();
-    const daysAsc = [...dates]; // aufsteigend: links Vergangenheit, rechts heute
+    const today = iso(new Date());
     function emptyDay() {
         const d = { verstopfung: null, notiz: "", nem: [] };
         SEV_COLS.forEach((c) => (d[c.id] = ""));
@@ -235,11 +270,20 @@ function App() {
             return { ...p, [date]: { ...p[date], [id]: next } };
         });
     }
-    function addRow() {
-        setModal({ type: "input", title: "Neue Kategorie", placeholder: "Name der Kategorie", submitLabel: "Hinzuf\u00fcgen", initial: "", action: { kind: "addrow" } });
+    function toggleNem(date, item) {
+        setEntries((p) => {
+            const cur = p[date].nem || [];
+            const nem = cur.includes(item) ? cur.filter((x) => x !== item) : [...cur, item];
+            return { ...p, [date]: { ...p[date], nem } };
+        });
     }
-    function applyAddRow(name) {
-        setCustomRows((p) => [...p, { id: "c_" + Date.now(), label: name }]);
+    function gotoDate(d) {
+        setEntries((p) => (p[d] ? p : { ...p, [d]: emptyDay() }));
+        setSelectedDate(d);
+        setView("day");
+    }
+    function applyAddRow(name, rowType) {
+        setCustomRows((p) => [...p, { id: "c_" + Date.now(), label: name, type: rowType === "sev" ? "sev" : "check" }]);
     }
     function applyRenameRow(id, name) {
         setCustomRows((p) => p.map((r) => (r.id === id ? { ...r, label: name } : r)));
@@ -280,10 +324,17 @@ function App() {
             return next;
         });
     }
-    // Fuehrt die im Modal gewaehlte Aktion aus und kehrt ggf. zum NEM-Fenster zurueck
+    function addNemOption(name) {
+        const n = name.trim();
+        if (!n || nemOptions.includes(n))
+            return;
+        setNemOptions((p) => [...p, n]);
+    }
     function runModalAction(action, value) {
         if (action.kind === "addrow")
-            applyAddRow(value);
+            applyAddRow(value, action.rowType);
+        if (action.kind === "addnem")
+            addNemOption(value);
         if (action.kind === "renamerow")
             applyRenameRow(action.id, value);
         if (action.kind === "delrow")
@@ -292,35 +343,7 @@ function App() {
             applyRenameNem(action.name, value);
         if (action.kind === "delnem")
             applyDeleteNem(action.name);
-        if (action.backToNem)
-            setModal({ type: "nem", date: action.backToNem });
-        else
-            setModal(null);
-    }
-    function addEarlierDays() {
-        setEntries((p) => {
-            const keys = Object.keys(p).sort();
-            const start = parseISO(keys[0]);
-            const next = { ...p };
-            for (let i = 1; i <= 7; i++) {
-                const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() - i);
-                next[iso(d)] = emptyDay();
-            }
-            return next;
-        });
-    }
-    function toggleNem(date, item) {
-        setEntries((p) => {
-            const cur = p[date].nem || [];
-            const nem = cur.includes(item) ? cur.filter((x) => x !== item) : [...cur, item];
-            return { ...p, [date]: { ...p[date], nem } };
-        });
-    }
-    function addNemOption(name) {
-        const n = name.trim();
-        if (!n || nemOptions.includes(n))
-            return;
-        setNemOptions((p) => [...p, n]);
+        setModal(null);
     }
     function exportCSV() {
         const cols = [
@@ -332,6 +355,7 @@ function App() {
             ...customRows,
             { id: "notiz", label: "Notizen" },
         ];
+        const sevIds = new Set([...SEV_COLS.map((c) => c.id), ...customRows.filter((r) => r.type === "sev").map((r) => r.id)]);
         const esc = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
         const tri = (v) => (v === true ? "ja" : v === false ? "nein" : "");
         const head = cols.map((c) => esc(c.label)).join(",");
@@ -346,16 +370,13 @@ function App() {
                     return esc(e.notiz || "");
                 if (c.id === "verstopfung")
                     return esc(tri(e.verstopfung));
-                if (SEV_COLS.find((s) => s.id === c.id))
+                if (sevIds.has(c.id))
                     return esc(e[c.id] || "");
                 return esc(tri(e[c.id]));
             }).join(",");
         });
         const csv = [head, ...rows].join("\n");
         setModal({ type: "csv", csv });
-    }
-    function runAnalysis() {
-        setAnalysis(analyze(entries, dates, customRows, nemOptions));
     }
     function importCSV(text) {
         let rows;
@@ -367,37 +388,50 @@ function App() {
         }
         if (!rows || rows.length < 2)
             return { ok: false, msg: "Keine Daten gefunden." };
-        const header = rows[0].map((h) => h.trim());
-        const dateIdx = header.findIndex((h) => h.toLowerCase() === "datum");
+        const header = rows[0].map((x) => x.trim());
+        const dateIdx = header.findIndex((x) => x.toLowerCase() === "datum");
         if (dateIdx < 0)
-            return { ok: false, msg: 'Spalte "Datum" fehlt \u2013 ist das ein Export dieser App?' };
+            return { ok: false, msg: 'Spalte "Datum" fehlt – ist das ein Export dieser App?' };
         const sevByLabel = {};
         SEV_COLS.forEach((c) => (sevByLabel[c.label] = c.id));
         const foodByLabel = {};
         FOODS.forEach((f) => (foodByLabel[f.label] = f.id));
         const customByLabel = {};
-        customRows.forEach((c) => (customByLabel[c.label] = c.id));
+        customRows.forEach((c) => (customByLabel[c.label] = c));
         const newCustom = [];
-        const colDesc = header.map((h, i) => {
+        const colDesc = header.map((hd, i) => {
             if (i === dateIdx)
                 return { kind: "date" };
-            if (sevByLabel[h])
-                return { kind: "sev", id: sevByLabel[h] };
-            if (h === "Kaki" || h === "Verstopfung")
+            if (sevByLabel[hd])
+                return { kind: "sev", id: sevByLabel[hd] };
+            if (hd === "Kaki" || hd === "Verstopfung")
                 return { kind: "check", id: "verstopfung" };
-            if (foodByLabel[h])
-                return { kind: "check", id: foodByLabel[h] };
-            if (h === "NEM")
+            if (foodByLabel[hd])
+                return { kind: "check", id: foodByLabel[hd] };
+            if (hd === "NEM")
                 return { kind: "nem" };
-            if (h === "Notizen")
+            if (hd === "Notizen")
                 return { kind: "notiz" };
-            let id = customByLabel[h];
-            if (!id) {
-                id = "c_" + Date.now() + "_" + i;
-                newCustom.push({ id, label: h });
-                customByLabel[h] = id;
+            const existing = customByLabel[hd];
+            if (existing)
+                return { kind: existing.type === "sev" ? "sev" : "check", id: existing.id };
+            // Unbekannte Spalte: Enthält sie nur Schweregrad-Wörter, ist es ein Symptom
+            let any = false, allSev = true;
+            for (let r = 1; r < rows.length; r++) {
+                const v = (rows[r][i] || "").trim();
+                if (!v)
+                    continue;
+                any = true;
+                if (!SEV_WORDS.includes(v)) {
+                    allSev = false;
+                    break;
+                }
             }
-            return { kind: "check", id };
+            const type = any && allSev ? "sev" : "check";
+            const def = { id: "c_" + Date.now() + "_" + i, label: hd, type };
+            newCustom.push(def);
+            customByLabel[hd] = def;
+            return { kind: type === "sev" ? "sev" : "check", id: def.id };
         });
         const imported = {};
         const nemSet = new Set(nemOptions);
@@ -411,7 +445,7 @@ function App() {
             colDesc.forEach((cd, i) => {
                 const val = (cells[i] !== undefined ? cells[i] : "").trim();
                 if (cd.kind === "sev")
-                    day[cd.id] = ["kein", "bisschen", "mittel", "viel"].includes(val) ? val : "";
+                    day[cd.id] = SEV_WORDS.includes(val) ? val : "";
                 else if (cd.kind === "check")
                     day[cd.id] = val.toLowerCase() === "ja" ? true : val.toLowerCase() === "nein" ? false : null;
                 else if (cd.kind === "nem") {
@@ -426,179 +460,308 @@ function App() {
             count++;
         }
         if (count === 0)
-            return { ok: false, msg: "Keine g\u00fcltigen Tageszeilen gefunden." };
+            return { ok: false, msg: "Keine gültigen Tageszeilen gefunden." };
         setCustomRows((prev) => { const have = new Set(prev.map((c) => c.label)); return [...prev, ...newCustom.filter((c) => !have.has(c.label))]; });
         setNemOptions([...nemSet]);
         setEntries((prev) => {
             const merged = { ...prev, ...imported };
             const keys = Object.keys(merged).sort();
-            const today = iso(new Date());
+            const today2 = iso(new Date());
             const last = keys[keys.length - 1];
-            const range = buildRange(keys[0], today > last ? today : last);
+            const range = buildRange(keys[0], today2 > last ? today2 : last);
             range.forEach((d) => { if (!merged[d])
                 merged[d] = emptyDay(); });
             return merged;
         });
-        return { ok: true, msg: count + " Tage importiert. Vorhandene Tage mit gleichem Datum wurden \u00fcberschrieben." };
+        return { ok: true, msg: count + " Tage importiert. Vorhandene Tage mit gleichem Datum wurden überschrieben." };
     }
     if (!loaded)
-        return React.createElement("div", { className: "loading" }, "L\u00E4dt\u2026");
-    // Zeilen-Definition (transponiert)
-    const ROWS = [
-        ...SEV_COLS.map((c) => ({ ...c, type: "sev" })),
-        { id: "verstopfung", label: "Kaki", type: "check", sepBelow: true },
-        ...FOODS.map((f, i) => ({ ...f, type: "check", sepBelow: i === FOODS.length - 1 })),
-        { id: "nem", label: "NEM", type: "nem", sepBelow: true },
-        ...customRows.map((c) => ({ ...c, type: "check" })),
-        { id: "notiz", label: "Notizen", type: "notiz" },
-    ];
-    const today = iso(new Date());
-    return (React.createElement("div", { className: "wrap" },
-        React.createElement(Style, null),
-        React.createElement("header", { className: "top" },
-            React.createElement("div", null,
-                React.createElement("h1", null, "Ern\u00E4hrungstagebuch"),
-                React.createElement("p", { className: "sub" }, "Gestillt \u00B7 Reaktionen bis 72 h nachwirkend")),
-            React.createElement("div", { className: "actions" },
-                React.createElement("button", { className: "btn primary", onClick: runAnalysis }, "Analysieren"),
-                React.createElement("button", { className: "btn", onClick: addRow }, "+ Kategorie"),
-                React.createElement("button", { className: "btn", onClick: addEarlierDays }, "+ Fr\u00FChere Tage"),
-                React.createElement("button", { className: "btn", onClick: () => setModal({ type: "import" }) }, "Import"),
-                React.createElement("button", { className: "btn", onClick: exportCSV }, "CSV"))),
-        React.createElement("div", { className: "legend" },
-            React.createElement("span", { className: "lg lg-kein" }, "kein"),
-            React.createElement("span", { className: "lg lg-bisschen" }, "bisschen"),
-            React.createElement("span", { className: "lg lg-mittel" }, "mittel"),
-            React.createElement("span", { className: "lg lg-viel" }, "viel"),
-            React.createElement("span", { className: "lg-sep" }),
-            React.createElement("span", { className: "lg-note" }, "K\u00E4stchen tippen: leer \u2192 ja (\u2713) \u2192 nein (\u2013) \u00B7 links liegen fr\u00FChere Tage")),
-        React.createElement("div", { className: "scroll", ref: scrollRef },
-            React.createElement("table", null,
-                React.createElement("thead", null,
-                    React.createElement("tr", null,
-                        React.createElement("th", { className: "corner sticky-l" }),
-                        daysAsc.map((d) => {
-                            const wd = WEEKDAYS[parseISO(d).getDay()];
-                            return (React.createElement("th", { key: d, className: "dayhead" + (d === today ? " today" : "") },
-                                React.createElement("span", { className: "dhv" },
-                                    React.createElement("span", { className: "dwd" }, wd),
-                                    "\u00A0\u00A0",
-                                    React.createElement("span", { className: "ddt" }, fmtShort(d)))));
-                        }))),
-                React.createElement("tbody", null, ROWS.map((row) => (React.createElement("tr", { key: row.id, className: row.sepBelow ? "sepBelow" : "" },
-                    React.createElement("td", { className: "rowlabel sticky-l" }, row.type === "check" && customRows.some((c) => c.id === row.id) ? (React.createElement("button", { className: "rowedit", onClick: () => setModal({ type: "rowedit", rowId: row.id }) },
-                        row.label,
-                        " ",
-                        React.createElement("span", { className: "editicon" }, "\u270E"))) : (row.label)),
-                    daysAsc.map((d) => {
-                        const e = entries[d];
-                        const tCls = "";
-                        if (row.type === "sev") {
-                            return (React.createElement("td", { key: d, className: "dc" + tCls },
-                                React.createElement("div", { className: "sevwrap sev-" + (e[row.id] || "none") },
-                                    React.createElement("select", { className: "sevsel", value: e[row.id], onChange: (ev) => update(d, row.id, ev.target.value) }, SEV_OPTIONS.map((o) => React.createElement("option", { key: o.v, value: o.v }, o.label))))));
-                        }
-                        if (row.type === "check") {
-                            const v = e[row.id];
-                            const cls = v === true ? "yes" : v === false ? "no" : "empty";
-                            const mark = v === true ? "✓" : v === false ? "–" : "";
-                            return (React.createElement("td", { key: d, className: "dc" + tCls },
-                                React.createElement("button", { className: "cell " + cls, onClick: () => cycle(d, row.id) }, mark)));
-                        }
-                        if (row.type === "nem") {
-                            const n = e.nem || [];
-                            return (React.createElement("td", { key: d, className: "dc" + tCls },
-                                React.createElement("button", { className: "cell soft", onClick: () => setModal({ type: "nem", date: d }) }, n.length ? React.createElement("span", { className: "badge" }, n.length) : React.createElement("span", { className: "ph" }, "+"))));
-                        }
-                        // notiz
-                        return (React.createElement("td", { key: d, className: "dc" + tCls },
-                            React.createElement("button", { className: "cell soft", onClick: () => setModal({ type: "notiz", date: d }) }, e.notiz ? React.createElement("span", { className: "notemark" }, "\u270E") : React.createElement("span", { className: "ph" }, "+"))));
-                    }))))))),
-        modal?.type === "nem" && (React.createElement(NemModal, { selected: entries[modal.date].nem || [], options: nemOptions, onToggle: (i) => toggleNem(modal.date, i), onAdd: addNemOption, onRename: (o) => setModal({ type: "input", title: "NEM umbenennen", placeholder: "Neuer Name", submitLabel: "Speichern", initial: o, action: { kind: "renamenem", name: o, backToNem: modal.date } }), onDelete: (o) => setModal({ type: "confirm", text: "NEM \u201E" + o + "\u201C aus der Liste und allen Tagen entfernen?", submitLabel: "Entfernen", action: { kind: "delnem", name: o, backToNem: modal.date } }), onClose: () => setModal(null), dateLabel: fmtShort(modal.date) })),
-        modal?.type === "notiz" && (React.createElement(NotizModal, { value: entries[modal.date].notiz || "", onChange: (v) => update(modal.date, "notiz", v), onClose: () => setModal(null), dateLabel: fmtShort(modal.date) })),
-        modal?.type === "rowedit" && (React.createElement(RowEditModal, { label: customRows.find((r) => r.id === modal.rowId)?.label || "", onRename: () => {
-                const row = customRows.find((r) => r.id === modal.rowId);
-                setModal({ type: "input", title: "Kategorie umbenennen", placeholder: "Neuer Name", submitLabel: "Speichern", initial: row?.label || "", action: { kind: "renamerow", id: modal.rowId } });
-            }, onDelete: () => {
-                const row = customRows.find((r) => r.id === modal.rowId);
-                setModal({ type: "confirm", text: "Kategorie \u201E" + (row?.label || "") + "\u201C l\u00f6schen? Alle Eintr\u00e4ge dieser Zeile gehen verloren.", submitLabel: "L\u00f6schen", action: { kind: "delrow", id: modal.rowId } });
-            }, onClose: () => setModal(null) })),
-        modal?.type === "input" && (React.createElement(InputModal, { title: modal.title, placeholder: modal.placeholder, submitLabel: modal.submitLabel, initial: modal.initial, onSubmit: (v) => runModalAction(modal.action, v), onClose: () => setModal(null) })),
-        modal?.type === "confirm" && (React.createElement(ConfirmModal, { text: modal.text, submitLabel: modal.submitLabel, onConfirm: () => runModalAction(modal.action), onClose: () => setModal(null) })),
-        modal?.type === "import" && (React.createElement(ImportModal, { onImport: importCSV, onClose: () => setModal(null) })),
-        modal?.type === "csv" && (React.createElement(CsvModal, { csv: modal.csv, onClose: () => setModal(null) })),
-        analysis && React.createElement(AnalysisModal, { text: analysis, onClose: () => setAnalysis(null) })));
+        return h("div", { className: "loading" }, "Lädt…");
+    const e = entries[selectedDate] || emptyDay();
+    const symRows = [...SEV_COLS.map((c) => ({ ...c, type: "sev" })), ...customRows.filter((r) => r.type === "sev").map((r) => ({ ...r, custom: true }))];
+    const trigRows = [...FOODS.map((f) => ({ ...f, type: "check" })), ...customRows.filter((r) => r.type !== "sev").map((r) => ({ ...r, type: "check", custom: true }))];
+    // ---------- Tages-Ansicht ----------
+    function editTap(row, noun) {
+        setModal({ type: "rowedit", rowId: row.id, noun });
+    }
+    function dayView() {
+        const isToday = selectedDate === today;
+        return h("div", { className: "page" },
+            h("div", { className: "datebar" },
+                h("button", { className: "arrowbtn", "aria-label": "Vortag", onClick: () => gotoDate(addDays(selectedDate, -1)) }, ICONS.left("nico")),
+                h("div", { className: "dchips", id: "dchips" }, dates.map((d) => h("button", {
+                    key: d,
+                    id: "chip-" + d,
+                    className: "dchip" + (d === selectedDate ? " sel" : "") + (d === today ? " istoday" : ""),
+                    onClick: () => gotoDate(d),
+                },
+                    h("span", { className: "wd" }, d === today ? "Heute" : WEEKDAYS[parseISO(d).getDay()]),
+                    h("span", { className: "dt" }, fmtShort(d))))),
+                h("button", { className: "arrowbtn", "aria-label": "Folgetag", disabled: isToday, onClick: () => !isToday && gotoDate(addDays(selectedDate, 1)) }, ICONS.right("nico"))),
+            !isToday && h("div", { className: "jumpbar" },
+                h("span", { className: "jumptxt" }, "Du bearbeitest ", h("strong", null, fmtDay(selectedDate))),
+                h("button", { className: "jumpbtn", onClick: () => gotoDate(today) }, "Zu heute")),
+            // --- Symptome ---
+            h("section", { className: "card card-sym" },
+                ICONS.pulse("watermark"),
+                h("div", { className: "cardhead" },
+                    h("h2", null, "Symptome"),
+                    h("button", { className: "editbtn" + (editCard === "sym" ? " on" : ""), "aria-label": "Symptome bearbeiten", onClick: () => setEditCard(editCard === "sym" ? null : "sym") }, ICONS.pencil("nico"))),
+                editCard === "sym" && h("p", { className: "edithint" }, "Antippen zum Umbenennen oder Löschen (nur eigene Symptome)."),
+                symRows.map((row) => h("div", { className: "symrow", key: row.id },
+                    h("div", { className: "symlabel" },
+                        editCard === "sym" && row.custom
+                            ? h("button", { className: "editable", onClick: () => editTap(row, "Symptom") }, row.label, " ✎")
+                            : h("span", { className: editCard === "sym" && !row.custom ? "dimlabel" : "" }, row.label)),
+                    h("div", { className: "segs" }, SEV_WORDS.map((w) => h("button", {
+                        key: w,
+                        className: "seg seg-" + w + (e[row.id] === w ? " on" : ""),
+                        onClick: () => update(selectedDate, row.id, e[row.id] === w ? "" : w),
+                    }, w))))),
+                h("div", { className: "symrow" },
+                    h("div", { className: "symlabel" }, h("span", null, "Kaki")),
+                    h("div", { className: "segs segs2" }, [["ja", true], ["nein", false]].map(([lab, val]) => h("button", {
+                        key: lab,
+                        className: "seg segneutral" + (e.verstopfung === val ? " on" : ""),
+                        onClick: () => update(selectedDate, "verstopfung", e.verstopfung === val ? null : val),
+                    }, lab)))),
+                h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neues Symptom", placeholder: "z. B. Bauchweh", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "sev" } }) }, "+ Symptom")),
+            // --- Ernährung & Auslöser ---
+            h("section", { className: "card card-trig" },
+                ICONS.apple("watermark"),
+                h("div", { className: "cardhead" },
+                    h("h2", null, "Ernährung & Auslöser"),
+                    h("button", { className: "editbtn" + (editCard === "trig" ? " on" : ""), "aria-label": "Auslöser bearbeiten", onClick: () => setEditCard(editCard === "trig" ? null : "trig") }, ICONS.pencil("nico"))),
+                h("p", { className: "cardsub" }, "Tippen: gegessen ✓ · nicht gegessen – · unbekannt"),
+                editCard === "trig" && h("p", { className: "edithint" }, "Antippen zum Umbenennen oder Löschen (nur eigene Auslöser)."),
+                h("div", { className: "chipgrid" }, trigRows.map((row) => {
+                    const v = e[row.id];
+                    if (editCard === "trig")
+                        return row.custom
+                            ? h("button", { key: row.id, className: "chip editable", onClick: () => editTap(row, "Auslöser") }, row.label + " ✎")
+                            : h("span", { key: row.id, className: "chip lockchip" }, row.label);
+                    const cls = v === true ? " yes" : v === false ? " no" : "";
+                    const mark = v === true ? "✓ " : v === false ? "– " : "";
+                    return h("button", { key: row.id, className: "chip" + cls, onClick: () => cycle(selectedDate, row.id) }, mark + row.label);
+                })),
+                h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neuer Auslöser", placeholder: "z. B. Weizen", submitLabel: "Hinzufügen", initial: "", action: { kind: "addrow", rowType: "check" } }) }, "+ Auslöser")),
+            // --- NEM ---
+            h("section", { className: "card card-nem" },
+                ICONS.pill("watermark"),
+                h("div", { className: "cardhead" },
+                    h("h2", null, "NEM"),
+                    h("button", { className: "editbtn" + (editCard === "nem" ? " on" : ""), "aria-label": "NEM bearbeiten", onClick: () => setEditCard(editCard === "nem" ? null : "nem") }, ICONS.pencil("nico"))),
+                h("p", { className: "cardsub" }, "Nahrungsergänzung — heute eingenommen?"),
+                editCard === "nem" && h("p", { className: "edithint" }, "Antippen zum Umbenennen oder Löschen."),
+                h("div", { className: "chipgrid" }, nemOptions.map((opt) => {
+                    if (editCard === "nem")
+                        return h("button", { key: opt, className: "chip editable", onClick: () => setModal({ type: "rowedit", nemName: opt, noun: "NEM" }) }, opt + " ✎");
+                    const on = (e.nem || []).includes(opt);
+                    return h("button", { key: opt, className: "chip" + (on ? " yes" : ""), onClick: () => toggleNem(selectedDate, opt) }, (on ? "✓ " : "") + opt);
+                })),
+                h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neues NEM", placeholder: "z. B. Omega 3", submitLabel: "Hinzufügen", initial: "", action: { kind: "addnem" } }) }, "+ NEM")),
+            // --- Notiz ---
+            h("section", { className: "card card-note" },
+                ICONS.pencil("watermark"),
+                h("div", { className: "cardhead" }, h("h2", null, "Notiz")),
+                h("textarea", { className: "notearea", value: e.notiz || "", placeholder: "Freie Notizen zum Tag…", onChange: (ev) => update(selectedDate, "notiz", ev.target.value) })));
+    }
+    // ---------- Verlaufs-Ansicht ----------
+    function weekView() {
+        const sections = [
+            { key: "sym", label: "Symptome", rows: [...symRows, { id: "verstopfung", label: "Kaki", type: "check" }] },
+            { key: "trig", label: "Ernährung & Auslöser", rows: trigRows },
+            { key: "nem", label: "NEM", rows: nemOptions.map((o) => ({ id: o, label: o, type: "nemopt" })) },
+            { key: "note", label: "Notizen", rows: [{ id: "notiz", label: "Notiz", type: "notiz" }] },
+        ];
+        function cellContent(d, row) {
+            const en = entries[d];
+            if (row.type === "sev") {
+                const v = en[row.id] || "";
+                return h("span", { className: "wsq sev-" + (v || "none") });
+            }
+            if (row.type === "nemopt")
+                return (en.nem || []).includes(row.id) ? h("span", { className: "wdot" }, "✓") : null;
+            if (row.type === "notiz")
+                return en.notiz ? h("span", { className: "wnote" }, "✎") : null;
+            const v = en[row.id];
+            if (v === true)
+                return h("span", { className: "wdot" }, "✓");
+            if (v === false)
+                return h("span", { className: "wno" }, "–");
+            return null;
+        }
+        return h("div", { className: "page" },
+            h("div", { className: "weekintro" },
+                h("h2", { className: "pagetitle" }, "Verlauf"),
+                h("p", { className: "pagesub" }, "Nur Übersicht — zum Bearbeiten Tag antippen.")),
+            h("div", { className: "legend" },
+                h("span", { className: "lg lg-kein" }, "kein"),
+                h("span", { className: "lg lg-bisschen" }, "bisschen"),
+                h("span", { className: "lg lg-mittel" }, "mittel"),
+                h("span", { className: "lg lg-viel" }, "viel")),
+            h("div", { className: "wscroll", ref: weekScrollRef },
+                h("table", { className: "wtable" },
+                    h("thead", null, h("tr", null,
+                        h("th", { className: "wcorner wsticky" }),
+                        dates.map((d) => h("th", { key: d, className: "wday" + (d === today ? " wtoday" : ""), onClick: () => gotoDate(d) },
+                            h("span", { className: "wdv" },
+                                h("span", { className: "wwd" }, WEEKDAYS[parseISO(d).getDay()]),
+                                "  ",
+                                h("span", { className: "wdt" }, fmtShort(d))))))),
+                    h("tbody", null, sections.flatMap((sec) => [
+                        h("tr", { key: "h_" + sec.key, className: "wsec wsec-" + sec.key },
+                            h("td", { className: "wseclabel wsticky" }, sec.label),
+                            h("td", { colSpan: dates.length })),
+                        ...sec.rows.map((row) => h("tr", { key: sec.key + "_" + row.id },
+                            h("td", { className: "wlabel wsticky" }, row.label),
+                            dates.map((d) => h("td", { key: d, className: "wc" + (d === today ? " wtoday" : ""), onClick: () => gotoDate(d) }, cellContent(d, row))))),
+                    ])))));
+    }
+    // ---------- Analyse-Ansicht ----------
+    function analysisView() {
+        const a = analyzeStructured(entries, dates, customRows, nemOptions);
+        const maxVal = Math.max(1, ...[...a.suspects, ...a.calm].flatMap((r) => [r.me, r.mu]));
+        const bar = (val, cls) => h("div", { className: "barwrap" },
+            h("div", { className: "bar " + cls, style: { width: Math.round((val / maxVal) * 100) + "%" } }),
+            h("span", { className: "barval" }, "Ø " + val.toFixed(1)));
+        const resultRow = (r) => h("div", { className: "resrow", key: r.label },
+            h("div", { className: "reslabel" }, r.label, r.constFlag ? h("span", { className: "resflag" }, " · auch seltener Stuhlgang") : null),
+            h("div", { className: "resbars" },
+                h("div", { className: "resline" }, h("span", { className: "resleg" }, "danach"), bar(r.me, "b-hot")),
+                h("div", { className: "resline" }, h("span", { className: "resleg" }, "ohne"), bar(r.mu, "b-cool"))));
+        return h("div", { className: "page" },
+            h("div", { className: "weekintro" },
+                h("h2", { className: "pagetitle" }, "Analyse"),
+                h("p", { className: "pagesub" }, a.enough
+                    ? `Auswertung über ${a.dataDays} Tage · Nachwirken bis 72 h (Stillzeit) berücksichtigt`
+                    : "Noch zu wenig Daten für eine Auswertung")),
+            !a.enough
+                ? h("section", { className: "acard" },
+                    h("p", { className: "atext" }, `Bisher ${a.dataDays} Tag(e) mit erfassten Symptomen. Trage am besten mindestens 7–10 Tage durchgehend Symptome und Lebensmittel ein, dann werden mögliche Muster sichtbar.`))
+                : h(React.Fragment, null,
+                    h("section", { className: "acard" },
+                        h("h3", { className: "ahead ah-hot" }, "Mögliche Auslöser"),
+                        h("p", { className: "ahint" }, "Höhere Symptomlast in den 3 Tagen nach Verzehr/Einnahme — Lebensmittel und jedes NEM einzeln geprüft."),
+                        a.suspects.length === 0
+                            ? h("p", { className: "atext" }, "Kein Lebensmittel zeigt aktuell einen deutlichen Zusammenhang.")
+                            : a.suspects.slice(0, 5).map(resultRow)),
+                    a.suspects.length > 0 && h("section", { className: "acard acard-next" },
+                        h("h3", { className: "ahead ah-lime" }, "Nächster Schritt"),
+                        h("p", { className: "atext" }, "Am aussagekräftigsten ist ein Auslassversuch: Lass „", h("strong", null, a.suspects[0].label), "“ ein paar Tage konsequent weg und beobachte, ob die Symptome zurückgehen.")),
+                    a.calm.length > 0 && h("section", { className: "acard" },
+                        h("h3", { className: "ahead ah-cool" }, "Eher unverdächtig"),
+                        h("p", { className: "ahint" }, "Symptome danach tendenziell geringer."),
+                        a.calm.slice(0, 4).map(resultRow)),
+                    a.tooOften.length > 0 && h("section", { className: "acard" },
+                        h("h3", { className: "ahead" }, "Nicht beurteilbar"),
+                        h("p", { className: "ahint" }, "Fast täglich gegessen — es fehlen Vergleichstage ohne."),
+                        h("div", { className: "achips" }, a.tooOften.map((x) => h("span", { className: "achip", key: x }, x)))),
+                    a.notUsed.length > 0 && h("section", { className: "acard" },
+                        h("h3", { className: "ahead" }, "Nie erfasst"),
+                        h("div", { className: "achips" }, a.notUsed.map((x) => h("span", { className: "achip", key: x }, x))))),
+            h("p", { className: "disclaimer" }, "Hinweis: Das sind statistische Muster, keine Beweise. Bei wenigen Tagen oder Lebensmitteln, die immer zusammen gegessen werden, können Scheinzusammenhänge entstehen. Anhaltende Beschwerden, Blut oder Schleim im Stuhl bitte kinderärztlich abklären."));
+    }
+    return h("div", { className: "app" },
+        h(Style, null),
+        h("header", { className: "topbar" },
+            h("div", { className: "avatar" }, "👶"),
+            h("div", { className: "titles" },
+                h("div", { className: "appname" }, "Ernährungstagebuch"),
+                h("div", { className: "appsub" }, "Gestillt · Reaktionen bis 72 h nachwirkend")),
+            h("button", { className: "gearbtn", "aria-label": "Einstellungen", onClick: () => setModal({ type: "settings" }) }, ICONS.gear("nico"))),
+        view === "day" && dayView(),
+        view === "week" && weekView(),
+        view === "analysis" && analysisView(),
+        h("nav", { className: "bottomnav" }, [
+            ["day", "Heute", ICONS.sun],
+            ["week", "Verlauf", ICONS.chart],
+            ["analysis", "Analyse", ICONS.bulb],
+        ].map(([v, label, icon]) => h("button", {
+            key: v,
+            className: "navitem" + (view === v ? " active" : ""),
+            onClick: () => { setView(v); setEditCard(null); },
+        }, icon("navico"), h("span", null, label)))),
+        modal?.type === "settings" && h(SettingsModal, {
+            onImport: () => setModal({ type: "import" }),
+            onExport: exportCSV,
+            onClose: () => setModal(null),
+        }),
+        modal?.type === "rowedit" && h(RowEditModal, {
+            label: modal.nemName || customRows.find((r) => r.id === modal.rowId)?.label || "",
+            noun: modal.noun,
+            onRename: () => {
+                if (modal.nemName)
+                    setModal({ type: "input", title: "NEM umbenennen", placeholder: "Neuer Name", submitLabel: "Speichern", initial: modal.nemName, action: { kind: "renamenem", name: modal.nemName } });
+                else {
+                    const row = customRows.find((r) => r.id === modal.rowId);
+                    setModal({ type: "input", title: modal.noun + " umbenennen", placeholder: "Neuer Name", submitLabel: "Speichern", initial: row?.label || "", action: { kind: "renamerow", id: modal.rowId } });
+                }
+            },
+            onDelete: () => {
+                if (modal.nemName)
+                    setModal({ type: "confirm", text: "NEM „" + modal.nemName + "“ aus der Liste und allen Tagen entfernen?", submitLabel: "Entfernen", action: { kind: "delnem", name: modal.nemName } });
+                else {
+                    const row = customRows.find((r) => r.id === modal.rowId);
+                    setModal({ type: "confirm", text: modal.noun + " „" + (row?.label || "") + "“ löschen? Alle Einträge dieser Zeile gehen verloren.", submitLabel: "Löschen", action: { kind: "delrow", id: modal.rowId } });
+                }
+            },
+            onClose: () => setModal(null),
+        }),
+        modal?.type === "input" && h(InputModal, { title: modal.title, placeholder: modal.placeholder, submitLabel: modal.submitLabel, initial: modal.initial, onSubmit: (v) => runModalAction(modal.action, v), onClose: () => setModal(null) }),
+        modal?.type === "confirm" && h(ConfirmModal, { text: modal.text, submitLabel: modal.submitLabel, onConfirm: () => runModalAction(modal.action), onClose: () => setModal(null) }),
+        modal?.type === "import" && h(ImportModal, { onImport: importCSV, onClose: () => setModal(null) }),
+        modal?.type === "csv" && h(CsvModal, { csv: modal.csv, onClose: () => setModal(null) }));
 }
-function NemModal({ selected, options, onToggle, onAdd, onRename, onDelete, onClose, dateLabel }) {
-    const [txt, setTxt] = useState("");
-    const [edit, setEdit] = useState(false);
-    return (React.createElement("div", { className: "sheet-bg", onClick: onClose },
-        React.createElement("div", { className: "sheet", onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "sheet-head" },
-                React.createElement("strong", null,
-                    "NEM \u00B7 ",
-                    dateLabel),
-                React.createElement("span", null,
-                    React.createElement("button", { className: "x wide-x" + (edit ? " active" : ""), onClick: () => setEdit(!edit), title: "Liste bearbeiten" }, "\u270E"),
-                    React.createElement("button", { className: "x", onClick: onClose }, "\u2715"))),
-            edit && React.createElement("p", { className: "hint" }, "Bearbeiten: \u270E = umbenennen, \u2715 = aus Liste und allen Tagen l\u00F6schen."),
-            React.createElement("div", { className: "chipgrid" }, options.map((o) => (edit ? (React.createElement("span", { key: o, className: "pill editpill" },
-                o,
-                React.createElement("button", { className: "mini", onClick: () => onRename(o) }, "\u270E"),
-                React.createElement("button", { className: "mini del", onClick: () => onDelete(o) }, "\u2715"))) : (React.createElement("button", { key: o, className: "pill " + (selected.includes(o) ? "sel" : ""), onClick: () => onToggle(o) }, o))))),
-            React.createElement("div", { className: "addrow" },
-                React.createElement("input", { value: txt, placeholder: "Neues NEM\u2026", onChange: (e) => setTxt(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && txt.trim()) {
-                        onAdd(txt);
-                        setTxt("");
-                    } } }),
-                React.createElement("button", { className: "btn", onClick: () => { if (txt.trim()) {
-                        onAdd(txt);
-                        setTxt("");
-                    } } }, "+ hinzuf\u00FCgen")),
-            React.createElement("button", { className: "btn wide", onClick: onClose }, "Fertig"))));
+// ================= Sheets =================
+function Sheet({ onClose, children, className }) {
+    return h("div", { className: "sheet-bg", onClick: onClose },
+        h("div", { className: "sheet" + (className ? " " + className : ""), onClick: (e) => e.stopPropagation() },
+            h("div", { className: "grab" }),
+            children));
 }
-function NotizModal({ value, onChange, onClose, dateLabel }) {
-    return (React.createElement("div", { className: "sheet-bg", onClick: onClose },
-        React.createElement("div", { className: "sheet", onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "sheet-head" },
-                React.createElement("strong", null,
-                    "Notiz \u00B7 ",
-                    dateLabel),
-                React.createElement("button", { className: "x", onClick: onClose }, "\u2715")),
-            React.createElement("textarea", { autoFocus: true, value: value, onChange: (e) => onChange(e.target.value), placeholder: "Freie Notizen zum Tag\u2026" }),
-            React.createElement("button", { className: "btn wide", onClick: onClose }, "Fertig"))));
+function SheetHead({ title, onClose }) {
+    return h("div", { className: "sheet-head" },
+        h("strong", null, title),
+        h("button", { className: "x", onClick: onClose }, "✕"));
+}
+function SettingsModal({ onImport, onExport, onClose }) {
+    return h(Sheet, { onClose },
+        h(SheetHead, { title: "Einstellungen", onClose }),
+        h("button", { className: "menuitem", onClick: onImport },
+            h("span", { className: "mi-ic" }, "📥"),
+            h("span", { className: "mi-tx" },
+                h("strong", null, "Import"),
+                h("small", null, "CSV-Export dieser App einlesen"))),
+        h("button", { className: "menuitem", onClick: onExport },
+            h("span", { className: "mi-ic" }, "📤"),
+            h("span", { className: "mi-tx" },
+                h("strong", null, "Export (CSV)"),
+                h("small", null, "Alle Daten als Text / Datei sichern"))),
+        h("p", { className: "hint" }, "Alle Daten bleiben lokal auf diesem Gerät gespeichert."));
 }
 function InputModal({ title, placeholder, submitLabel, initial, onSubmit, onClose }) {
     const [txt, setTxt] = useState(initial || "");
     const ok = () => { if (txt.trim())
         onSubmit(txt.trim()); };
-    return (React.createElement("div", { className: "sheet-bg", onClick: onClose },
-        React.createElement("div", { className: "sheet", onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "sheet-head" },
-                React.createElement("strong", null, title),
-                React.createElement("button", { className: "x", onClick: onClose }, "\u2715")),
-            React.createElement("input", { className: "modalinput", autoFocus: true, value: txt, placeholder: placeholder, onChange: (e) => setTxt(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
-                    ok(); } }),
-            React.createElement("button", { className: "btn primary wide", onClick: ok, disabled: !txt.trim() }, submitLabel))));
+    return h(Sheet, { onClose },
+        h(SheetHead, { title, onClose }),
+        h("input", { className: "modalinput", autoFocus: true, value: txt, placeholder, onChange: (e) => setTxt(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
+                ok(); } }),
+        h("button", { className: "btn primary wide", onClick: ok, disabled: !txt.trim() }, submitLabel));
 }
 function ConfirmModal({ text, submitLabel, onConfirm, onClose }) {
-    return (React.createElement("div", { className: "sheet-bg", onClick: onClose },
-        React.createElement("div", { className: "sheet", onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "sheet-head" },
-                React.createElement("strong", null, "Bist du sicher?"),
-                React.createElement("button", { className: "x", onClick: onClose }, "\u2715")),
-            React.createElement("p", { className: "confirmtext" }, text),
-            React.createElement("button", { className: "btn wide danger", onClick: onConfirm }, submitLabel),
-            React.createElement("button", { className: "btn wide", onClick: onClose }, "Abbrechen"))));
+    return h(Sheet, { onClose },
+        h(SheetHead, { title: "Bist du sicher?", onClose }),
+        h("p", { className: "confirmtext" }, text),
+        h("button", { className: "btn wide danger", onClick: onConfirm }, submitLabel),
+        h("button", { className: "btn wide", onClick: onClose }, "Abbrechen"));
 }
-function RowEditModal({ label, onRename, onDelete, onClose }) {
-    return (React.createElement("div", { className: "sheet-bg", onClick: onClose },
-        React.createElement("div", { className: "sheet", onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "sheet-head" },
-                React.createElement("strong", null, label),
-                React.createElement("button", { className: "x", onClick: onClose }, "\u2715")),
-            React.createElement("button", { className: "btn wide", onClick: onRename }, "Umbenennen"),
-            React.createElement("button", { className: "btn wide danger", onClick: onDelete }, "Kategorie l\u00F6schen"))));
+function RowEditModal({ label, noun, onRename, onDelete, onClose }) {
+    return h(Sheet, { onClose },
+        h(SheetHead, { title: label, onClose }),
+        h("button", { className: "btn wide", onClick: onRename }, "Umbenennen"),
+        h("button", { className: "btn wide danger", onClick: onDelete }, (noun || "Eintrag") + " löschen"));
 }
 function ImportModal({ onImport, onClose }) {
     const [txt, setTxt] = useState("");
@@ -613,18 +776,15 @@ function ImportModal({ onImport, onClose }) {
     };
     const go = () => { if (txt.trim())
         setRes(onImport(txt)); };
-    return (React.createElement("div", { className: "sheet-bg", onClick: onClose },
-        React.createElement("div", { className: "sheet", onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "sheet-head" },
-                React.createElement("strong", null, "Daten importieren"),
-                React.createElement("button", { className: "x", onClick: onClose }, "\u2715")),
-            React.createElement("p", { className: "hint" }, "CSV-Datei w\\u00e4hlen oder den kopierten Text einf\\u00fcgen. Format: ein Export dieser App."),
-            React.createElement("input", { type: "file", accept: ".csv,text/csv,text/plain", onChange: onFile, className: "fileinput" }),
-            React.createElement("textarea", { className: "csvbox", placeholder: "\\u2026 oder CSV-Text hier einf\\u00fcgen", value: txt, onChange: (e) => setTxt(e.target.value) }),
-            res && React.createElement("p", { className: res.ok ? "okmsg" : "errmsg" }, res.msg),
-            res && res.ok
-                ? React.createElement("button", { className: "btn primary wide", onClick: onClose }, "Fertig")
-                : React.createElement("button", { className: "btn primary wide", onClick: go, disabled: !txt.trim() }, "Importieren"))));
+    return h(Sheet, { onClose },
+        h(SheetHead, { title: "Daten importieren", onClose }),
+        h("p", { className: "hint" }, "CSV-Datei wählen oder den kopierten Text einfügen. Format: ein Export dieser App."),
+        h("input", { type: "file", accept: ".csv,text/csv,text/plain", onChange: onFile, className: "fileinput" }),
+        h("textarea", { className: "csvbox", placeholder: "… oder CSV-Text hier einfügen", value: txt, onChange: (e) => setTxt(e.target.value) }),
+        res && h("p", { className: res.ok ? "okmsg" : "errmsg" }, res.msg),
+        res && res.ok
+            ? h("button", { className: "btn primary wide", onClick: onClose }, "Fertig")
+            : h("button", { className: "btn primary wide", onClick: go, disabled: !txt.trim() }, "Importieren"));
 }
 function CsvModal({ csv, onClose }) {
     const taRef = useRef(null);
@@ -647,33 +807,22 @@ function CsvModal({ csv, onClose }) {
         setTimeout(() => setCopied(false), 1600);
     };
     const dataUrl = "data:text/csv;charset=utf-8," + encodeURIComponent("\uFEFF" + csv);
-    return (React.createElement("div", { className: "sheet-bg", onClick: onClose },
-        React.createElement("div", { className: "sheet", onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "sheet-head" },
-                React.createElement("strong", null, "Daten exportieren"),
-                React.createElement("button", { className: "x", onClick: onClose }, "\u2715")),
-            React.createElement("p", { className: "hint" }, "Text kopieren und z. B. in Google Sheets, Notizen oder eine .csv-Datei einf\u00FCgen."),
-            React.createElement("textarea", { ref: taRef, className: "csvbox", readOnly: true, value: csv, onFocus: (e) => e.target.select() }),
-            React.createElement("button", { className: "btn primary wide", onClick: copy }, copied ? "Kopiert ✓" : "In Zwischenablage kopieren"),
-            React.createElement("a", { className: "btn wide dl", href: dataUrl, download: `ernaehrungstagebuch_${iso(new Date())}.csv` }, "Als Datei laden (falls unterst\u00FCtzt)"))));
-}
-function AnalysisModal({ text, onClose }) {
-    return (React.createElement("div", { className: "sheet-bg", onClick: onClose },
-        React.createElement("div", { className: "sheet analysis", onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "sheet-head" },
-                React.createElement("strong", null, "Analyse"),
-                React.createElement("button", { className: "x", onClick: onClose }, "\u2715")),
-            React.createElement("div", { className: "analysis-body" }, text),
-            React.createElement("button", { className: "btn wide", onClick: onClose }, "Schlie\u00DFen"))));
+    return h(Sheet, { onClose },
+        h(SheetHead, { title: "Daten exportieren", onClose }),
+        h("p", { className: "hint" }, "Text kopieren und z. B. in Google Sheets, Notizen oder eine .csv-Datei einfügen."),
+        h("textarea", { ref: taRef, className: "csvbox", readOnly: true, value: csv, onFocus: (e) => e.target.select() }),
+        h("button", { className: "btn primary wide", onClick: copy }, copied ? "Kopiert ✓" : "In Zwischenablage kopieren"),
+        h("a", { className: "btn wide dl", href: dataUrl, download: `ernaehrungstagebuch_${iso(new Date())}.csv` }, "Als Datei laden (falls unterstützt)"));
 }
 // ================= Analyse =================
-function analyze(entries, orderedDates, customRows, nemOptions) {
+function analyzeStructured(entries, orderedDates, customRows, nemOptions) {
     // Alle NEM, die irgendwo eingetragen wurden (auch bereits gelöschte Optionen)
     const nemUsed = new Set(nemOptions);
     orderedDates.forEach((d) => (entries[d].nem || []).forEach((x) => nemUsed.add(x)));
+    const sevRows = [...SEV_COLS, ...customRows.filter((r) => r.type === "sev")];
     const inputCols = [
         ...FOODS.map((f) => ({ id: f.id, label: f.label, kind: "check" })),
-        ...customRows.map((c) => ({ id: c.id, label: c.label, kind: "check" })),
+        ...customRows.filter((r) => r.type !== "sev").map((c) => ({ id: c.id, label: c.label, kind: "check" })),
         ...[...nemUsed].map((n) => ({ id: n, label: "NEM: " + n, kind: "nem" })),
     ];
     const load = {}, hasData = {}, constip = {}, idx = {};
@@ -681,7 +830,7 @@ function analyze(entries, orderedDates, customRows, nemOptions) {
     orderedDates.forEach((d) => {
         const e = entries[d] || {};
         let sum = 0, has = false;
-        SEV_COLS.forEach((c) => { const n = sevVal(e[c.id]); if (n !== null) {
+        sevRows.forEach((c) => { const n = sevVal(e[c.id]); if (n !== null) {
             sum += n;
             has = true;
         } });
@@ -690,10 +839,10 @@ function analyze(entries, orderedDates, customRows, nemOptions) {
         constip[d] = e.verstopfung === false;
     });
     const dataDays = orderedDates.filter((d) => hasData[d]);
-    if (dataDays.length < 5) {
-        return `Noch zu wenig Daten für eine Auswertung.\n\nBisher ${dataDays.length} Tag(e) mit erfassten Symptomen. Trage am besten mindestens 7–10 Tage durchgehend Symptome und Lebensmittel ein, dann werden mögliche Muster sichtbar.`;
-    }
-    const results = [], tooOften = [], notUsed = [];
+    const out = { dataDays: dataDays.length, enough: dataDays.length >= 5, suspects: [], calm: [], tooOften: [], notUsed: [] };
+    if (!out.enough)
+        return out;
+    const results = [];
     inputCols.forEach((col) => {
         const consumed = new Set();
         orderedDates.forEach((d) => {
@@ -705,7 +854,7 @@ function analyze(entries, orderedDates, customRows, nemOptions) {
                 consumed.add(d);
         });
         if (consumed.size === 0) {
-            notUsed.push(col.label);
+            out.notUsed.push(col.label);
             return;
         }
         let expSum = 0, expN = 0, unSum = 0, unN = 0, expC = 0, unC = 0;
@@ -734,129 +883,208 @@ function analyze(entries, orderedDates, customRows, nemOptions) {
         });
         if (expN < 2 || unN < 2) {
             if (expN >= 2 && unN < 2)
-                tooOften.push(col.label);
+                out.tooOften.push(col.label);
             return;
         }
         const me = expSum / expN, mu = unSum / unN;
-        results.push({ label: col.label, diff: me - mu, me, mu, constDiff: expC / expN - unC / unN });
+        results.push({ label: col.label, diff: me - mu, me, mu, constFlag: expC / expN - unC / unN > 0.25 });
     });
     results.sort((a, b) => b.diff - a.diff);
-    const suspects = results.filter((r) => r.diff > 0.5);
-    const calm = results.filter((r) => r.diff < -0.5);
-    let out = `Auswertung über ${dataDays.length} Tage mit Symptomdaten.\nBerücksichtigt wird ein Nachwirken von bis zu 72 Stunden (Stillzeit).\n\n`;
-    out += "MÖGLICHE AUSLÖSER (höhere Symptomlast in den 3 Tagen nach Verzehr/Einnahme – Lebensmittel und jedes NEM einzeln geprüft):\n";
-    if (suspects.length === 0)
-        out += "Kein Lebensmittel zeigt aktuell einen deutlichen Zusammenhang.\n";
-    else
-        suspects.slice(0, 5).forEach((r) => {
-            const c = r.constDiff > 0.25 ? " · auch seltener Stuhlgang" : "";
-            out += `• ${r.label}: Ø ${r.me.toFixed(1)} statt ${r.mu.toFixed(1)} Symptompunkte${c}\n`;
-        });
-    if (calm.length) {
-        out += "\nEHER UNVERDÄCHTIG (Symptome tendenziell geringer):\n";
-        calm.slice(0, 4).forEach((r) => { out += `• ${r.label}: Ø ${r.me.toFixed(1)} statt ${r.mu.toFixed(1)}\n`; });
-    }
-    if (tooOften.length)
-        out += `\nNICHT BEURTEILBAR (fast täglich gegessen – es fehlen Vergleichstage ohne):\n${tooOften.join(", ")}\n`;
-    if (notUsed.length)
-        out += `\nNie erfasst: ${notUsed.join(", ")}\n`;
-    if (suspects.length)
-        out += `\nNÄCHSTER SCHRITT: Am aussagekräftigsten ist ein Auslassversuch. Lass „${suspects[0].label}" ein paar Tage konsequent weg und beobachte, ob die Symptome zurückgehen.`;
-    out += "\n\nHinweis: Das sind statistische Muster, keine Beweise. Bei wenigen Tagen oder Lebensmitteln, die immer zusammen gegessen werden, können Scheinzusammenhänge entstehen. Anhaltende Beschwerden, Blut oder Schleim im Stuhl bitte kinderärztlich abklären.";
+    out.suspects = results.filter((r) => r.diff > 0.5);
+    out.calm = results.filter((r) => r.diff < -0.5).sort((a, b) => a.diff - b.diff);
     return out;
 }
 // ================= Styles =================
 function Style() {
-    return (React.createElement("style", null, `
+    return h("style", null, `
+      :root {
+        --bg: #141b2b; --surface: #1d2637; --surface2: #28334a; --line: #324058;
+        --ink: #f2f5fa; --mut: #8b96ab;
+        --lime: #c3d63f; --lime-ink: #232b0a;
+        --c-sym: #e8794a; --c-sym-deep: #8a3a17;
+        --c-trig: #4fb8dd; --c-trig-deep: #0d5e80;
+        --c-nem: #56c778; --c-nem-deep: #14602f;
+        --c-note: #8f86e8; --c-note-deep: #3d34a0;
+        --sev-kein: #4ade80; --sev-bisschen: #a3e635; --sev-mittel: #fb923c; --sev-viel: #ef4444;
+      }
       * { box-sizing: border-box; }
-      .wrap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #202b2e; background: #FBFAF7; min-height: 100vh; padding: 12px; -webkit-text-size-adjust: 100%; }
-      .loading { padding: 40px; text-align: center; color: #6b7472; }
-      .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
-      h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
-      .sub { margin: 2px 0 0; font-size: 12px; color: #6b7472; }
-      .actions { display: flex; gap: 6px; flex-wrap: wrap; }
-      .btn { border: 1px solid #d8d4ca; background: #fff; color: #202b2e; padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-      .btn:active { transform: translateY(1px); }
-      .btn.primary { background: #24343a; color: #fff; border-color: #24343a; }
-      .btn.wide { width: 100%; margin-top: 12px; padding: 12px; }
+      .app { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink);
+        background: var(--bg); min-height: 100vh; padding-bottom: calc(78px + env(safe-area-inset-bottom));
+        -webkit-text-size-adjust: 100%; max-width: 560px; margin: 0 auto; }
+      .loading { padding: 40px; text-align: center; color: var(--mut); background: var(--bg); min-height: 100vh; }
+      button { -webkit-tap-highlight-color: transparent; }
 
-      .legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 2px 10px; font-size: 11px; }
-      .lg { padding: 2px 8px; border-radius: 20px; font-weight: 600; }
-      .lg-kein { background: #cfe9d6; color: #14663a; }
-      .lg-bisschen { background: #cfe0fb; color: #1e40af; }
-      .lg-mittel { background: #f7e3a8; color: #8a5a06; }
-      .lg-viel { background: #f6c9c9; color: #9a1414; }
-      .lg-sep { width: 1px; height: 14px; background: #ddd8ce; }
-      .lg-note { color: #6b7472; }
+      .topbar { display: flex; align-items: center; gap: 11px; padding: 14px 16px 6px; }
+      .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 20px; flex: 0 0 auto; }
+      .titles { flex: 1; min-width: 0; }
+      .appname { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+      .appsub { font-size: 11.5px; color: var(--mut); margin-top: 1px; }
+      .gearbtn { border: none; background: var(--surface2); color: var(--mut); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+      .nico { width: 20px; height: 20px; }
 
-      .scroll { overflow-x: auto; border: 1px solid #e6e2d9; border-radius: 10px; background: #fff; -webkit-overflow-scrolling: touch; }
-      table { border-collapse: separate; border-spacing: 0; }
+      .page { padding: 2px 0 8px; }
 
-      thead .dayhead { position: sticky; top: 0; z-index: 3; background: #f3f1ea; color: #4a5457; padding: 6px 0 5px; border-bottom: 1px solid #e0dccf; border-right: 1px solid #ece9df; text-align: center; min-width: 30px; width: 30px; vertical-align: bottom; }
-      .dayhead.today { background: #eef3ee; }
-      .dhv { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; display: inline-block; line-height: 1; }
-      .dwd { font-size: 10px; font-weight: 700; color: #9aa3a1; }
-      .dayhead.today .dwd { color: #2f7a52; }
-      .ddt { font-size: 11px; font-weight: 700; margin-top: 3px; }
+      /* Datums-Navigation */
+      .datebar { display: flex; align-items: center; gap: 4px; padding: 6px 8px 0; }
+      .arrowbtn { border: none; background: var(--surface2); color: var(--ink); width: 36px; height: 44px; border-radius: 14px; cursor: pointer; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+      .arrowbtn:disabled { opacity: .35; }
+      .dchips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; flex: 1; padding: 2px; }
+      .dchips::-webkit-scrollbar { display: none; }
+      .dchip { flex: 0 0 auto; border: 1.5px solid transparent; background: var(--surface); border-radius: 14px; padding: 5px 11px; text-align: center; cursor: pointer; }
+      .dchip .wd { display: block; font-size: 10px; font-weight: 700; color: var(--mut); }
+      .dchip .dt { display: block; font-size: 12.5px; font-weight: 800; color: var(--ink); margin-top: 1px; }
+      .dchip.istoday { border-color: rgba(195,214,63,.55); }
+      .dchip.istoday .wd { color: var(--lime); }
+      .dchip.sel { background: var(--lime); border-color: var(--lime); }
+      .dchip.sel .wd, .dchip.sel .dt { color: var(--lime-ink); }
 
-      .corner { position: sticky; left: 0; top: 0; z-index: 5; background: #f3f1ea; border-bottom: 1px solid #e0dccf; border-right: 1px solid #e0dccf; min-width: 92px; width: 92px; }
+      .jumpbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 12px 0; background: var(--surface); border-radius: 14px; padding: 9px 12px; font-size: 12.5px; color: var(--mut); }
+      .jumpbar strong { color: var(--ink); }
+      .jumpbtn { border: 1.5px solid var(--lime); color: var(--lime); background: transparent; border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 800; cursor: pointer; }
 
-      .sticky-l { position: sticky; left: 0; }
-      .rowlabel { z-index: 2; background: #fff; text-align: left; white-space: nowrap; padding: 0 10px; font-size: 12px; font-weight: 600; min-width: 92px; width: 92px; height: 30px; border-right: 1px solid #e6e2d9; border-bottom: 1px solid #f0ede4; }
-      tr.sepBelow .rowlabel, tr.sepBelow .dc { border-bottom: 2px solid #d3cec2; }
+      /* Karten */
+      .card { position: relative; overflow: hidden; border-radius: 24px; padding: 16px 16px 18px; margin: 12px 12px 0; color: #fff; }
+      .card-sym { background: var(--c-sym); }
+      .card-trig { background: var(--c-trig); }
+      .card-nem { background: var(--c-nem); }
+      .card-note { background: var(--c-note); }
+      .watermark { position: absolute; right: -14px; bottom: -18px; width: 110px; height: 110px; opacity: .18; pointer-events: none; }
+      .cardhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .card h2 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -0.01em; }
+      .cardsub { margin: 4px 0 0; font-size: 12px; color: rgba(255,255,255,.75); position: relative; }
+      .edithint { margin: 8px 0 0; font-size: 12px; color: rgba(255,255,255,.9); background: rgba(0,0,0,.18); border-radius: 10px; padding: 6px 10px; position: relative; }
+      .editbtn { border: none; background: rgba(0,0,0,.18); color: rgba(255,255,255,.85); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+      .editbtn.on { background: #fff; color: #333; }
+      .editbtn .nico { width: 16px; height: 16px; }
 
-      .dc { width: 30px; min-width: 30px; height: 30px; padding: 0; background: #fff; border-right: 1px solid #f2efe7; border-bottom: 1px solid #f0ede4; }
+      /* Symptome: Segmente */
+      .symrow { margin-top: 13px; position: relative; }
+      .symlabel { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+      .symlabel .editable { border: none; background: rgba(0,0,0,.18); color: #fff; font: inherit; border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+      .dimlabel { opacity: .85; }
+      .segs { display: flex; gap: 3px; background: rgba(0,0,0,.22); border-radius: 999px; padding: 3px; }
+      .segs2 { max-width: 220px; }
+      .seg { flex: 1; border: none; background: transparent; color: rgba(255,255,255,.8); font-size: 12.5px; font-weight: 700; padding: 8px 0; border-radius: 999px; cursor: pointer; }
+      .seg.on.seg-kein { background: var(--sev-kein); color: #0b3018; }
+      .seg.on.seg-bisschen { background: var(--sev-bisschen); color: #2c3a08; }
+      .seg.on.seg-mittel { background: var(--sev-mittel); color: #4a1e02; }
+      .seg.on.seg-viel { background: var(--sev-viel); color: #fff; }
+      .seg.segneutral.on { background: #fff; color: #333; }
 
-      .cell { width: 100%; height: 100%; border: none; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; cursor: pointer; -webkit-tap-highlight-color: transparent; color: #333; }
-      .cell.yes { background: #fff; color: #1a1a1a; }
-      .cell.no { background: #fff; color: #c4c9c5; }
-      .cell.empty { background: #fff; color: transparent; }
-      .ph { color: #c4c9c5; font-size: 14px; font-weight: 400; }
-      .badge { background: #ece7f5; color: #4b3b78; border-radius: 9px; min-width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; padding: 0 4px; }
-      .notemark { color: #4a5457; font-size: 13px; }
+      /* Chips */
+      .chipgrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; position: relative; }
+      .chip { border: 1.5px solid rgba(255,255,255,.55); background: transparent; color: #fff; border-radius: 999px; padding: 9px 14px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+      .card-trig .chip.yes { background: #fff; border-color: #fff; color: var(--c-trig-deep); }
+      .card-nem .chip.yes { background: #fff; border-color: #fff; color: var(--c-nem-deep); }
+      .chip.no { background: rgba(0,0,0,.25); border-color: transparent; color: rgba(255,255,255,.6); text-decoration: line-through; }
+      .chip.editable { border-style: solid; background: rgba(0,0,0,.18); border-color: transparent; }
+      .chip.lockchip { opacity: .45; border-style: solid; }
+      .addchip { margin-top: 14px; border: 1.5px dashed rgba(255,255,255,.6); background: transparent; color: #fff; border-radius: 999px; padding: 9px 16px; font-size: 13.5px; font-weight: 800; cursor: pointer; position: relative; }
 
-      .sevwrap { position: relative; width: 100%; height: 100%; }
-      .sevwrap.sev-none { background: #fff; }
-      .sevwrap.sev-kein { background: #cfe9d6; }
-      .sevwrap.sev-bisschen { background: #cfe0fb; }
-      .sevwrap.sev-mittel { background: #f7e3a8; }
-      .sevwrap.sev-viel { background: #f6c9c9; }
-      .sevsel { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: none; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+      /* Notiz */
+      .notearea { width: 100%; min-height: 90px; margin-top: 12px; border: none; border-radius: 14px; background: rgba(0,0,0,.2); color: #fff; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; position: relative; }
+      .notearea::placeholder { color: rgba(255,255,255,.55); }
+      .notearea:focus { outline: 2px solid rgba(255,255,255,.45); }
+      .modalinput:focus, .csvbox:focus { outline: 2px solid rgba(195,214,63,.5); }
 
-      .sheet-bg { position: fixed; inset: 0; background: rgba(20,26,28,.4); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
-      .sheet { background: #fff; width: 100%; max-width: 460px; border-radius: 16px 16px 0 0; padding: 16px; box-shadow: 0 -8px 30px rgba(0,0,0,.15); animation: up .18s ease; }
+      /* Verlauf */
+      .weekintro { padding: 10px 16px 0; }
+      .pagetitle { margin: 0; font-size: 21px; font-weight: 800; }
+      .pagesub { margin: 3px 0 0; font-size: 12.5px; color: var(--mut); }
+      .legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 16px 0; font-size: 11px; }
+      .lg { padding: 2px 9px; border-radius: 20px; font-weight: 700; }
+      .lg-kein { background: var(--sev-kein); color: #0b3018; }
+      .lg-bisschen { background: var(--sev-bisschen); color: #2c3a08; }
+      .lg-mittel { background: var(--sev-mittel); color: #4a1e02; }
+      .lg-viel { background: var(--sev-viel); color: #fff; }
+      .wscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 10px 12px 0; border-radius: 18px; background: var(--surface); }
+      .wtable { border-collapse: separate; border-spacing: 0; }
+      .wsticky { position: sticky; left: 0; background: var(--surface); z-index: 2; }
+      .wcorner { min-width: 104px; width: 104px; border-bottom: 1px solid var(--line); }
+      .wday { min-width: 34px; width: 34px; padding: 6px 0 5px; border-bottom: 1px solid var(--line); vertical-align: bottom; cursor: pointer; }
+      .wdv { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; display: inline-block; line-height: 1; }
+      .wwd { font-size: 10px; font-weight: 700; color: var(--mut); }
+      .wdt { font-size: 11px; font-weight: 700; color: var(--ink); margin-top: 3px; }
+      .wday.wtoday .wwd, .wday.wtoday .wdt { color: var(--lime); }
+      .wseclabel { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 8px 12px 4px; white-space: nowrap; }
+      .wsec-sym .wseclabel { color: var(--c-sym); }
+      .wsec-trig .wseclabel { color: var(--c-trig); }
+      .wsec-nem .wseclabel { color: var(--c-nem); }
+      .wsec-note .wseclabel { color: var(--c-note); }
+      .wlabel { font-size: 12px; font-weight: 600; padding: 0 12px; white-space: nowrap; height: 32px; border-right: 1px solid var(--line); min-width: 104px; width: 104px; }
+      .wc { text-align: center; vertical-align: middle; height: 32px; min-width: 34px; cursor: pointer; border-bottom: 1px solid rgba(50,64,88,.35); }
+      .wc.wtoday { background: rgba(195,214,63,.07); }
+      .wsq { display: inline-block; width: 17px; height: 17px; border-radius: 6px; }
+      .wsq.sev-none { border: 1.5px dashed var(--line); }
+      .wsq.sev-kein { background: var(--sev-kein); }
+      .wsq.sev-bisschen { background: var(--sev-bisschen); }
+      .wsq.sev-mittel { background: var(--sev-mittel); }
+      .wsq.sev-viel { background: var(--sev-viel); }
+      .wdot { color: var(--ink); font-size: 12px; font-weight: 800; }
+      .wno { color: var(--mut); font-weight: 700; }
+      .wnote { color: var(--mut); font-size: 12px; }
+
+      /* Analyse */
+      .acard { background: var(--surface); border-radius: 20px; padding: 14px 16px; margin: 12px 12px 0; }
+      .acard-next { border: 1.5px solid rgba(195,214,63,.5); }
+      .ahead { margin: 0; font-size: 15px; font-weight: 800; color: var(--ink); }
+      .ah-hot { color: var(--c-sym); }
+      .ah-cool { color: var(--c-nem); }
+      .ah-lime { color: var(--lime); }
+      .ahint { margin: 3px 0 0; font-size: 12px; color: var(--mut); }
+      .atext { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--ink); }
+      .resrow { margin-top: 12px; }
+      .reslabel { font-size: 13.5px; font-weight: 700; }
+      .resflag { font-size: 11.5px; font-weight: 600; color: var(--mut); }
+      .resbars { margin-top: 5px; display: flex; flex-direction: column; gap: 3px; }
+      .resline { display: flex; align-items: center; gap: 8px; }
+      .resleg { font-size: 10.5px; color: var(--mut); width: 42px; flex: 0 0 auto; text-align: right; }
+      .barwrap { flex: 1; display: flex; align-items: center; gap: 7px; }
+      .bar { height: 9px; border-radius: 5px; min-width: 3px; }
+      .b-hot { background: var(--c-sym); }
+      .b-cool { background: var(--surface2); }
+      .barval { font-size: 11px; color: var(--mut); font-weight: 700; }
+      .achips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+      .achip { background: var(--surface2); color: var(--ink); border-radius: 999px; padding: 4px 11px; font-size: 12px; font-weight: 600; }
+      .disclaimer { margin: 14px 16px 0; font-size: 11.5px; line-height: 1.5; color: var(--mut); }
+
+      /* Bottom-Nav */
+      .bottomnav { position: fixed; left: 0; right: 0; bottom: 0; background: #101624; border-top: 1px solid #202b41;
+        display: flex; justify-content: space-around; padding: 7px 10px calc(7px + env(safe-area-inset-bottom)); z-index: 30; }
+      .navitem { border: none; background: transparent; color: var(--mut); display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 700; cursor: pointer; padding: 3px 16px; border-radius: 12px; }
+      .navico { width: 23px; height: 23px; }
+      .navitem.active { color: var(--lime); }
+
+      /* Sheets */
+      .sheet-bg { position: fixed; inset: 0; background: rgba(5,8,15,.6); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+      .sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 460px; border-radius: 20px 20px 0 0; padding: 10px 16px 20px; box-shadow: 0 -8px 30px rgba(0,0,0,.4); animation: up .18s ease; }
+      .grab { width: 38px; height: 4px; border-radius: 2px; background: var(--surface2); margin: 2px auto 10px; }
       @keyframes up { from { transform: translateY(20px); opacity: .6 } to { transform: none; opacity: 1 } }
       .sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 15px; }
-      .x { border: none; background: #f0ede4; width: 30px; height: 30px; border-radius: 50%; font-size: 14px; cursor: pointer; color: #4a5457; }
-      .chipgrid { display: flex; flex-wrap: wrap; gap: 8px; }
-      .pill { border: 1px solid #d8d4ca; background: #fff; padding: 8px 12px; border-radius: 20px; font-size: 13px; cursor: pointer; font-weight: 600; color: #3a4447; }
-      .pill.sel { background: #ece7f5; border-color: #b9a9e0; color: #4b3b78; }
-      .addrow { display: flex; gap: 6px; margin-top: 14px; }
-      .addrow input { flex: 1; border: 1px solid #d8d4ca; border-radius: 8px; padding: 10px; font-size: 14px; }
-      textarea { width: 100%; min-height: 120px; border: 1px solid #d8d4ca; border-radius: 8px; padding: 10px; font-size: 14px; font-family: inherit; resize: vertical; }
-      .analysis { max-width: 520px; }
-      .analysis-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.5; color: #2b3538; max-height: 60vh; overflow-y: auto; }
-      .hint { font-size: 12.5px; color: #6b7472; margin: 0 0 10px; }
-      .csvbox { width: 100%; height: 150px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: pre; }
-      .dl { display: block; text-align: center; text-decoration: none; margin-top: 8px; }
-      .rowedit { border: none; background: transparent; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; }
-      .editicon { color: #b0b6b3; font-size: 10px; }
-      .btn.danger { color: #9a1414; border-color: #e6b8b8; margin-top: 8px; }
-      .wide-x { margin-right: 6px; }
-      .x.active { background: #ece7f5; color: #4b3b78; }
-      .editpill { display: inline-flex; align-items: center; gap: 5px; }
-      .mini { border: none; background: #f0ede4; border-radius: 50%; width: 20px; height: 20px; font-size: 10px; cursor: pointer; color: #4a5457; padding: 0; }
-      .mini.del { color: #9a1414; }
-      .modalinput { width: 100%; border: 1px solid #d8d4ca; border-radius: 8px; padding: 12px; font-size: 15px; }
-      .confirmtext { font-size: 14px; color: #3a4447; margin: 0 0 4px; line-height: 1.45; }
+      .x { border: none; background: var(--surface2); color: var(--mut); width: 30px; height: 30px; border-radius: 50%; font-size: 14px; cursor: pointer; }
+      .btn { border: 1px solid var(--line); background: var(--surface2); color: var(--ink); padding: 9px 13px; border-radius: 14px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+      .btn:active { transform: translateY(1px); }
+      .btn.primary { background: var(--lime); color: var(--lime-ink); border-color: var(--lime); }
+      .btn.wide { width: 100%; margin-top: 10px; padding: 13px; }
+      .btn.danger { color: #ff8f8f; border-color: #5c3038; background: transparent; }
       .btn:disabled { opacity: .45; cursor: default; }
-      .fileinput { display: block; width: 100%; font-size: 13px; margin-bottom: 10px; }
-      .okmsg { color: #14663a; font-size: 13px; margin: 10px 0 4px; }
-      .errmsg { color: #9a1414; font-size: 13px; margin: 10px 0 4px; }
-    `));
+      .menuitem { display: flex; align-items: center; gap: 12px; width: 100%; border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: 16px; padding: 13px; margin-bottom: 8px; cursor: pointer; text-align: left; }
+      .mi-ic { font-size: 20px; }
+      .mi-tx { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+      .mi-tx small { color: var(--mut); font-size: 12px; }
+      .hint { font-size: 12.5px; color: var(--mut); margin: 4px 0 10px; }
+      .modalinput { width: 100%; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); border-radius: 12px; padding: 12px; font-size: 15px; }
+      .modalinput::placeholder { color: var(--mut); }
+      .confirmtext { font-size: 14px; color: var(--ink); margin: 0 0 4px; line-height: 1.45; }
+      .csvbox { width: 100%; height: 150px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: pre; background: var(--surface2); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+      .fileinput { display: block; width: 100%; font-size: 13px; margin-bottom: 10px; color: var(--mut); }
+      .okmsg { color: #7ade9c; font-size: 13px; margin: 10px 0 4px; }
+      .errmsg { color: #ff8f8f; font-size: 13px; margin: 10px 0 4px; }
+      .dl { display: block; text-align: center; text-decoration: none; margin-top: 8px; }
+    `);
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+ReactDOM.createRoot(document.getElementById("root")).render(h(App));
 </script>
 </body>
 </html>
