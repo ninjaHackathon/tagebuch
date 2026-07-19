@@ -68,6 +68,8 @@ const TPL_SYMPTOMS = [
     { id: "s_spucken", label: "Spucken", type: "sev" },
     { id: "s_schlaf", label: "Unruhiger Schlaf", type: "sev" },
     { id: "s_wunderpo", label: "Wunder Po", type: "sev" },
+    { id: "s_augen", label: "Verklebte Augen", type: "check" },
+    { id: "s_ekzem", label: "Ekzem / trockene Haut", type: "sev" },
 ];
 // Nur für die Migration alter v2-Daten (feste ids der ursprünglichen Liste)
 const LEGACY_SYMPTOMS = [
@@ -741,7 +743,7 @@ function App() {
             all.map((item, i) => {
                 const lastSevGuard = listName === "sym" && isLastVisibleSev(item);
                 return h("div", { className: "editrow" + (item.hidden ? " hid" : ""), key: item.id },
-                    h("span", { className: "editname" }, item.label, item.type === "check" && listName === "sym" ? h("small", { className: "typetag" }, " ja/nein") : null),
+                    h("span", { className: "editname" }, item.label),
                     h("span", { className: "editacts" },
                         h("button", { className: "act", disabled: i === 0, "aria-label": "nach oben", onClick: () => moveItem(listName, item.id, -1) }, ICONS.up("aico")),
                         h("button", { className: "act", disabled: i === all.length - 1, "aria-label": "nach unten", onClick: () => moveItem(listName, item.id, 1) }, ICONS.down("aico")),
@@ -962,7 +964,12 @@ function App() {
             title: modal.list === "trig" ? "Auslöser hinzufügen" : "NEM hinzufügen",
             catalog: modal.list === "trig" ? CATALOG_FOODS : CATALOG_NEMS,
             existing: (modal.list === "trig" ? foods : nems).map((x) => x.label),
-            onAdd: (labels) => labels.forEach((l) => addItem(modal.list, l)),
+            onAdd: (l) => addItem(modal.list, l),
+            onDelete: (l) => {
+                const item = (modal.list === "trig" ? foods : nems).find((x) => x.label === l);
+                if (item)
+                    deleteItem(modal.list, item.id);
+            },
             onClose: () => setModal(null),
         }),
         modal?.type === "addsym" && h(AddSymptomModal, {
@@ -998,27 +1005,20 @@ function SetupWizard({ onFinish }) {
     const [birthdate, setBirthdate] = useState("");
     // Bewusst nichts vorausgewählt — die Nutzerin trifft eine aktive Auswahl
     const [symSel, setSymSel] = useState({});
-    const [foodSel, setFoodSel] = useState({});
-    const [foodCustom, setFoodCustom] = useState([]);
-    const [nemSel, setNemSel] = useState({});
-    const [nemCustom, setNemCustom] = useState([]);
+    const [foodList, setFoodList] = useState([]);
+    const [nemList, setNemList] = useState([]);
     const steps = ["Kind", "Symptome", "Ernährung", "NEM"];
     const selectedSymAny = TPL_SYMPTOMS.filter((t) => symSel[t.id]).length;
     const selectedSymSev = TPL_SYMPTOMS.filter((t) => symSel[t.id] && t.type === "sev").length;
     function finish() {
         const symptoms = TPL_SYMPTOMS.filter((t) => symSel[t.id]).map((t) => ({ ...t, hidden: false, order: null }));
-        const foods = [
-            ...TPL_FOODS.filter((t) => foodSel[t.id]).map((t) => ({ ...t, hidden: false, order: null })),
-            ...foodCustom.map((l) => ({ id: newId(), label: l, hidden: false, order: null })),
-        ];
-        const nems = [
-            ...CATALOG_NEMS.filter((n) => nemSel[n]),
-            ...nemCustom,
-        ].map((n) => ({ id: n, label: n, hidden: false, order: null }));
+        const tplFoodByLabel = Object.fromEntries(TPL_FOODS.map((t) => [t.label, t.id]));
+        const foods = foodList.map((l) => ({ id: tplFoodByLabel[l] || newId(), label: l, hidden: false, order: null }));
+        const nems = nemList.map((n) => ({ id: n, label: n, hidden: false, order: null }));
         onFinish({ profile: { name: name.trim(), gender, birthdate }, symptoms, foods, nems });
     }
     const canNext = step === 0 ? name.trim().length > 0 : step === 1 ? selectedSymAny > 0 : true;
-    const tplChips = (tpls, sel, setSel, getKey, getLabel, twoCol) => h("div", { className: "setupgrid" + (twoCol ? " setupgrid2" : "") }, tpls.map((t) => {
+    const tplChips = (tpls, sel, setSel, getKey, getLabel) => h("div", { className: "setupgrid" }, tpls.map((t) => {
         const k = getKey(t);
         return h("button", {
             key: k,
@@ -1026,7 +1026,6 @@ function SetupWizard({ onFinish }) {
             onClick: () => setSel((p) => ({ ...p, [k]: !p[k] })),
         }, (sel[k] ? "✓ " : "") + getLabel(t));
     }));
-    const customChips = (list, setList) => list.length > 0 && h("div", { className: "setupgrid" }, list.map((l, i) => h("button", { key: i, className: "chip setupchip yes", onClick: () => setList((p) => p.filter((_, j) => j !== i)) }, "✓ " + l)));
     return h("div", { className: "setup" },
         h("div", { className: "setuphead" },
             h("div", { className: "setuplogo" }, "🍼"),
@@ -1045,28 +1044,22 @@ function SetupWizard({ onFinish }) {
                 h("label", { className: "flabel" }, "Geburtsdatum"),
                 h("input", { className: "modalinput", type: "date", value: birthdate, onChange: (e) => setBirthdate(e.target.value) })),
             step === 1 && h(React.Fragment, null,
-                tplChips(TPL_SYMPTOMS, symSel, setSymSel, (t) => t.id, (t) => t.label + (t.type === "check" ? " (ja/nein)" : "")),
+                tplChips(TPL_SYMPTOMS, symSel, setSymSel, (t) => t.id, (t) => t.label),
                 h("p", { className: "hint", style: { marginTop: "12px" } }, "Weitere Symptome kannst du später jederzeit in der App anlegen."),
                 selectedSymAny === 0 && h("p", { className: "setupwarn" }, "Wähle mindestens ein Symptom aus."),
                 selectedSymAny > 0 && selectedSymSev === 0 && h("p", { className: "setupwarn" }, "Tipp: Für die Analyse brauchst du mindestens ein Symptom mit Farbskala.")),
-            step === 2 && h(React.Fragment, null,
-                tplChips(TPL_FOODS, foodSel, setFoodSel, (t) => t.id, (t) => t.label),
-                customChips(foodCustom, setFoodCustom),
-                h("label", { className: "flabel" }, "Weitere hinzufügen"),
-                h(CatalogPicker, {
-                    catalog: CATALOG_FOODS,
-                    existing: [...TPL_FOODS.map((t) => t.label), ...foodCustom],
-                    onAdd: (labels) => setFoodCustom((p) => [...p, ...labels]),
-                })),
-            step === 3 && h(React.Fragment, null,
-                tplChips(CATALOG_NEMS, nemSel, setNemSel, (n) => n, (n) => n, true),
-                customChips(nemCustom, setNemCustom),
-                h("label", { className: "flabel" }, "Weitere hinzufügen"),
-                h(CatalogPicker, {
-                    catalog: CATALOG_NEMS,
-                    existing: [...CATALOG_NEMS, ...nemCustom],
-                    onAdd: (labels) => setNemCustom((p) => [...p, ...labels]),
-                }))),
+            step === 2 && h(InstantPicker, {
+                catalog: CATALOG_FOODS,
+                selected: foodList,
+                onSelect: (l) => setFoodList((p) => [...p, l]),
+                onRemove: (l) => setFoodList((p) => p.filter((x) => x !== l)),
+            }),
+            step === 3 && h(InstantPicker, {
+                catalog: CATALOG_NEMS,
+                selected: nemList,
+                onSelect: (l) => setNemList((p) => [...p, l]),
+                onRemove: (l) => setNemList((p) => p.filter((x) => x !== l)),
+            })),
         h("div", { className: "setupnav" },
             step > 0 ? h("button", { className: "btn", onClick: () => setStep(step - 1) }, "Zurück") : h("span", null),
             step < 3
@@ -1074,43 +1067,41 @@ function SetupWizard({ onFinish }) {
                 : h("button", { className: "btn primary", disabled: !canNext, onClick: finish }, "Los geht's!")));
 }
 // ================= Suchauswahl mit Standard-Katalog =================
-function CatalogPicker({ catalog, existing, onAdd, placeholder }) {
+// Klick auf einen Listeneintrag fügt ihn sofort als Badge oben hinzu;
+// Klick auf ein Badge entfernt ihn wieder.
+function InstantPicker({ catalog, selected, existing, onSelect, onRemove, placeholder }) {
     const [q, setQ] = useState("");
-    const [sel, setSel] = useState([]);
-    const exist = new Set(existing.map((x) => x.toLowerCase()));
     const qt = q.trim();
-    const options = catalog.filter((c) => !exist.has(c.toLowerCase()) && !sel.includes(c) && c.toLowerCase().includes(qt.toLowerCase()));
+    const taken = new Set([...selected, ...(existing || [])].map((x) => x.toLowerCase()));
+    const options = catalog.filter((c) => !taken.has(c.toLowerCase()) && c.toLowerCase().includes(qt.toLowerCase()));
     const canFree = qt.length > 0
-        && !exist.has(qt.toLowerCase())
-        && !sel.some((s) => s.toLowerCase() === qt.toLowerCase())
+        && !taken.has(qt.toLowerCase())
         && !catalog.some((c) => c.toLowerCase() === qt.toLowerCase());
-    const toggleSel = (label) => setSel((p) => (p.includes(label) ? p.filter((x) => x !== label) : [...p, label]));
-    const addFree = () => { if (canFree) {
-        setSel((p) => [...p, qt]);
-        setQ("");
-    } };
-    const commit = () => { if (sel.length) {
-        onAdd(sel);
-        setSel([]);
-        setQ("");
-    } };
+    const pick = (label) => { onSelect(label); setQ(""); };
     return h("div", { className: "picker" },
-        h("input", { className: "modalinput", value: q, placeholder: placeholder || "Suchen oder Neues eintippen…", onChange: (e) => setQ(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
-                addFree(); } }),
+        selected.length > 0 && h("div", { className: "badgewrap" },
+            selected.map((l) => h("button", { key: l, className: "pickbadge", onClick: () => onRemove(l) }, l, h("span", { className: "bx" }, "✕")))),
+        h("input", { className: "modalinput", value: q, placeholder: placeholder || "Suchen oder Neues eintippen…", onChange: (e) => setQ(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && canFree)
+                pick(qt); } }),
         h("div", { className: "pickerlist" },
-            sel.map((label) => h("button", { key: "s_" + label, className: "pickrow on", onClick: () => toggleSel(label) },
-                h("span", { className: "pickbox on" }, "✓"), label)),
-            canFree && h("button", { key: "free", className: "pickrow free", onClick: addFree },
+            canFree && h("button", { key: "free", className: "pickrow free", onClick: () => pick(qt) },
                 h("span", { className: "pickbox" }, "+"), "„" + qt + "“ selbst anlegen"),
-            options.map((label) => h("button", { key: label, className: "pickrow", onClick: () => toggleSel(label) },
-                h("span", { className: "pickbox" }), label)),
-            options.length === 0 && !canFree && sel.length === 0 && h("p", { className: "hint", style: { margin: "8px 10px" } }, "Tippe oben, um etwas Eigenes hinzuzufügen.")),
-        h("button", { className: "btn primary wide", disabled: !sel.length, onClick: commit }, sel.length ? sel.length + " hinzufügen" : "Hinzufügen"));
+            options.map((label) => h("button", { key: label, className: "pickrow", onClick: () => pick(label) },
+                h("span", { className: "pickbox" }, "+"), label)),
+            options.length === 0 && !canFree && h("p", { className: "hint", style: { margin: "8px 10px" } }, "Tippe oben, um etwas Eigenes hinzuzufügen.")));
 }
-function PickerModal({ title, catalog, existing, onAdd, onClose }) {
+function PickerModal({ title, catalog, existing, onAdd, onDelete, onClose }) {
+    const [added, setAdded] = useState([]);
     return h(Sheet, { onClose },
         h(SheetHead, { title, onClose }),
-        h(CatalogPicker, { catalog, existing, onAdd: (labels) => { onAdd(labels); onClose(); } }));
+        h(InstantPicker, {
+            catalog,
+            selected: added,
+            existing,
+            onSelect: (l) => { onAdd(l); setAdded((p) => [...p, l]); },
+            onRemove: (l) => { onDelete(l); setAdded((p) => p.filter((x) => x !== l)); },
+        }),
+        h("button", { className: "btn primary wide", onClick: onClose }, "Fertig"));
 }
 // ================= Auth =================
 function AuthScreen({ client }) {
@@ -1635,8 +1626,10 @@ function Style() {
       .pickrow { display: flex; align-items: center; gap: 10px; width: 100%; border: none; background: transparent; color: var(--ink); padding: 9px 10px; border-radius: 9px; font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; }
       .pickrow.on { background: rgba(195,214,63,.12); }
       .pickrow.free { color: var(--lime); }
-      .pickbox { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--mut); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex: 0 0 auto; color: var(--lime-ink); }
-      .pickbox.on { background: var(--lime); border-color: var(--lime); font-weight: 800; }
+      .pickbox { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--mut); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex: 0 0 auto; color: var(--mut); font-weight: 800; }
+      .badgewrap { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+      .pickbadge { display: inline-flex; align-items: center; gap: 7px; background: var(--lime); color: var(--lime-ink); border: none; border-radius: 999px; padding: 8px 13px; font-size: 13.5px; font-weight: 800; cursor: pointer; }
+      .pickbadge .bx { font-size: 11px; opacity: .65; }
 
       .authtabs { display: flex; background: var(--surface2); border-radius: 999px; padding: 3px; margin-bottom: 6px; }
       .authtab { flex: 1; border: none; background: transparent; color: var(--mut); font-size: 13.5px; font-weight: 800; padding: 9px 0; border-radius: 999px; cursor: pointer; }
