@@ -65,7 +65,23 @@ const TPL_SYMPTOMS = [
     { id: "weinen_abends", label: "Weinen Abends", type: "sev" },
     { id: "verstopfung", label: "Kaki", type: "check" },
 ];
+// Standard-Lebensmittel (Setup-Vorauswahl)
 const TPL_FOODS = [
+    { id: "f_milch", label: "Milch" },
+    { id: "f_eier", label: "Eier" },
+    { id: "f_nachtschatten", label: "Nachtschattengewächse" },
+    { id: "f_getreide", label: "Getreide" },
+    { id: "f_zucker", label: "Zucker" },
+    { id: "f_obst", label: "Obst" },
+    { id: "f_honig", label: "Honig" },
+    { id: "f_zwiebel", label: "Zwiebel" },
+    { id: "f_knoblauch", label: "Knoblauch" },
+    { id: "f_knochenbruehe", label: "Knochenbrühe" },
+    { id: "f_fermente", label: "Fermente" },
+    { id: "f_histamin", label: "Histaminhaltig" },
+];
+// Nur für die Migration alter v2-Daten (feste ids der ursprünglichen Liste)
+const LEGACY_FOODS = [
     { id: "f_kapseln", label: "Kapseln" },
     { id: "f_eier", label: "Eier" },
     { id: "f_milch", label: "Milch" },
@@ -78,15 +94,23 @@ const TPL_FOODS = [
 const TPL_NEMS = ["Zn", "Mg", "Vit C", "Vit D", "Elektrolyte", "Jod", "Cu", "Se", "Vit B", "Bitter"]; // nur noch für v2-Migration
 // Standard-Kataloge für die Suchauswahl (und Setup-Vorauswahl bei NEM)
 const CATALOG_NEMS = [
-    "Zink", "Magnesium", "Vitamin C", "Vitamin D3", "Vitamin B-Komplex", "Eisen",
-    "Omega-3 / Fischöl", "Jod", "Selen", "Kupfer", "Calcium", "Folsäure",
-    "Elektrolyte", "Probiotika", "Bitterstoffe", "Lebertran",
+    // Vitamine (B-Vitamine als ein Eintrag)
+    "Vitamin A", "Vitamin B-Komplex", "Vitamin C", "Vitamin D3", "Vitamin E", "Vitamin K2",
+    // Gängige Mineralien / Spurenelemente
+    "Zink", "Magnesium", "Eisen", "Calcium", "Kalium", "Selen", "Jod", "Kupfer", "Mangan", "Chrom", "Elektrolyte",
+    // Bekannte Vitalpilze
+    "Reishi", "Löwenmähne (Hericium)", "Chaga", "Cordyceps", "Shiitake", "Maitake",
+    // Bekannte Bindemittel
+    "Zeolith", "Bentonit", "Aktivkohle", "Chlorella", "Flohsamenschalen",
+    // Weitere gängige NEM
+    "Omega-3 / Fischöl", "Lebertran", "Probiotika", "Verdauungsenzyme", "Bitterstoffe", "Kollagen", "Q10", "Spirulina",
 ];
 const CATALOG_FOODS = [
-    "Kuhmilch", "Ei", "Weizen / Gluten", "Soja", "Erdnuss", "Nüsse", "Fisch",
-    "Meeresfrüchte", "Zitrusfrüchte", "Tomate", "Zwiebel", "Knoblauch", "Kohl",
-    "Hülsenfrüchte", "Schokolade / Kakao", "Koffein", "Scharf Gewürztes",
-    "Histaminreiches (z. B. gereifter Käse)", "Erdbeeren", "Banane",
+    ...TPL_FOODS.map((f) => f.label),
+    // Weitere häufige Auslöser
+    "Soja", "Nüsse", "Erdnuss", "Fisch", "Meeresfrüchte", "Hülsenfrüchte",
+    "Kohlgemüse", "Zitrusfrüchte", "Koffein", "Schokolade / Kakao",
+    "Scharf Gewürztes", "Alkohol", "Rindfleisch", "Schweinefleisch",
 ];
 const STORAGE_V3 = "ernaehrungstagebuch:v3";
 const STORAGE_V2 = "ernaehrungstagebuch:v2";
@@ -227,7 +251,7 @@ function migrateV2(saved) {
         ...customs.filter((r) => r.type === "sev").map((r) => ({ id: r.id, label: r.label, type: "sev", hidden: false, order: null })),
     ];
     const foods = [
-        ...TPL_FOODS.map((t) => ({ ...t, hidden: false, order: null })),
+        ...LEGACY_FOODS.map((t) => ({ ...t, hidden: false, order: null })),
         ...customs.filter((r) => r.type !== "sev").map((r) => ({ id: r.id, label: r.label, hidden: false, order: null })),
     ];
     const nems = (saved.nemOptions || TPL_NEMS).map((n) => ({ id: n, label: n, hidden: false, order: null }));
