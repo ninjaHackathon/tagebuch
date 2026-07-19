@@ -16,6 +16,8 @@
   }
   window.addEventListener("error", function (e) {
     if (e && e.target && e.target.tagName === "SCRIPT") {
+      // Optionale Skripte (z. B. Supabase) behandeln ihren Ladefehler selbst
+      if (e.target.getAttribute && e.target.getAttribute("data-optional")) return;
       showError("Eine Skript-Datei konnte nicht geladen werden:\n" + (e.target.src || "unbekannt") + "\n\nBitte Internetverbindung prüfen (WLAN/Mobilfunk wechseln) und neu laden.");
     } else if (e && e.message) {
       showError(e.message + (e.filename ? ("\n" + e.filename + ":" + e.lineno) : ""));
@@ -46,8 +48,8 @@ const h = React.createElement;
 // <<HIER EINTRAGEN>> — Projekt-URL und anon public key aus deinem Supabase-Projekt
 // (Dashboard -> Project Settings -> API). Solange beides leer ist, läuft die App
 // rein lokal ohne Login. Anleitung: siehe README.md
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
+const SUPABASE_URL = "https://uofavzwkbapegxtjumsu.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvZmF2endrYmFwZWd4dGp1bXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzMzc2MjUsImV4cCI6MjA5OTkxMzYyNX0.zCngBU13ABQx-uf6NOIXMPWFteOh6aR6lH1wBRPBM0k";
 const SUPABASE_ENABLED = /^https:\/\//.test(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
 // ---------- Konfiguration / Vorlagen ----------
 const WEEKDAYS = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
@@ -57,13 +59,43 @@ const sevVal = (v) => {
     return i > 0 ? i - 1 : null;
 };
 const TPL_SYMPTOMS = [
+    { id: "s_reflux", label: "Reflux", type: "sev" },
+    { id: "s_blaehungen", label: "Blähungen", type: "sev" },
+    { id: "verstopfung", label: "Stuhlgang", type: "check" }, // id bleibt: Analyse wertet nein = seltener Stuhlgang
+    { id: "s_ausschlag", label: "Ausschlag", type: "sev" },
+    { id: "s_weinen", label: "Weinen / Unruhe", type: "sev" },
+    { id: "s_bauchweh", label: "Bauchweh / Koliken", type: "sev" },
+    { id: "s_spucken", label: "Spucken", type: "sev" },
+    { id: "s_schlaf", label: "Unruhiger Schlaf", type: "sev" },
+    { id: "s_wunderpo", label: "Wunder Po", type: "sev" },
+    { id: "s_augen", label: "Verklebte Augen", type: "check" },
+    { id: "s_ekzem", label: "Ekzem / trockene Haut", type: "sev" },
+];
+// Nur für die Migration alter v2-Daten (feste ids der ursprünglichen Liste)
+const LEGACY_SYMPTOMS = [
     { id: "reflux_tag", label: "Reflux Tag", type: "sev" },
     { id: "reflux_nacht", label: "Reflux Nacht", type: "sev" },
     { id: "weinen_tag", label: "Weinen Tag", type: "sev" },
     { id: "weinen_abends", label: "Weinen Abends", type: "sev" },
     { id: "verstopfung", label: "Kaki", type: "check" },
 ];
+// Standard-Lebensmittel (Setup-Vorauswahl)
 const TPL_FOODS = [
+    { id: "f_milch", label: "Milch" },
+    { id: "f_eier", label: "Eier" },
+    { id: "f_nachtschatten", label: "Nachtschattengewächse" },
+    { id: "f_getreide", label: "Getreide" },
+    { id: "f_zucker", label: "Zucker" },
+    { id: "f_obst", label: "Obst" },
+    { id: "f_honig", label: "Honig" },
+    { id: "f_zwiebel", label: "Zwiebel" },
+    { id: "f_knoblauch", label: "Knoblauch" },
+    { id: "f_knochenbruehe", label: "Knochenbrühe" },
+    { id: "f_fermente", label: "Fermente" },
+    { id: "f_histamin", label: "Histaminhaltig" },
+];
+// Nur für die Migration alter v2-Daten (feste ids der ursprünglichen Liste)
+const LEGACY_FOODS = [
     { id: "f_kapseln", label: "Kapseln" },
     { id: "f_eier", label: "Eier" },
     { id: "f_milch", label: "Milch" },
@@ -73,7 +105,27 @@ const TPL_FOODS = [
     { id: "f_obst", label: "Obst" },
     { id: "f_rindfleisch", label: "Rindfleisch" },
 ];
-const TPL_NEMS = ["Zn", "Mg", "Vit C", "Vit D", "Elektrolyte", "Jod", "Cu", "Se", "Vit B", "Bitter"];
+const TPL_NEMS = ["Zn", "Mg", "Vit C", "Vit D", "Elektrolyte", "Jod", "Cu", "Se", "Vit B", "Bitter"]; // nur noch für v2-Migration
+// Standard-Kataloge für die Suchauswahl (und Setup-Vorauswahl bei NEM)
+const CATALOG_NEMS = [
+    // Vitamine (B-Vitamine als ein Eintrag)
+    "Vitamin A", "Vitamin B-Komplex", "Vitamin C", "Vitamin D3", "Vitamin E", "Vitamin K2",
+    // Gängige Mineralien / Spurenelemente
+    "Zink", "Magnesium", "Eisen", "Calcium", "Kalium", "Selen", "Jod", "Kupfer", "Mangan", "Chrom", "Elektrolyte",
+    // Bekannte Vitalpilze
+    "Reishi", "Löwenmähne (Hericium)", "Chaga", "Cordyceps", "Shiitake", "Maitake",
+    // Bekannte Bindemittel
+    "Zeolith", "Bentonit", "Aktivkohle", "Chlorella", "Flohsamenschalen",
+    // Weitere gängige NEM
+    "Omega-3 / Fischöl", "Lebertran", "Probiotika", "Verdauungsenzyme", "Bitterstoffe", "Kollagen", "Q10", "Spirulina",
+];
+const CATALOG_FOODS = [
+    ...TPL_FOODS.map((f) => f.label),
+    // Weitere häufige Auslöser
+    "Soja", "Nüsse", "Erdnuss", "Fisch", "Meeresfrüchte", "Hülsenfrüchte",
+    "Kohlgemüse", "Zitrusfrüchte", "Koffein", "Schokolade / Kakao",
+    "Scharf Gewürztes", "Alkohol", "Rindfleisch", "Schweinefleisch",
+];
 const STORAGE_V3 = "ernaehrungstagebuch:v3";
 const STORAGE_V2 = "ernaehrungstagebuch:v2";
 let idCounter = 0;
@@ -209,11 +261,11 @@ function loadStored() {
 function migrateV2(saved) {
     const customs = (saved.customRows || saved.customCols || []).map((r) => ({ ...r, type: r.type === "sev" ? "sev" : "check" }));
     const symptoms = [
-        ...TPL_SYMPTOMS.map((t) => ({ ...t, hidden: false, order: null })),
+        ...LEGACY_SYMPTOMS.map((t) => ({ ...t, hidden: false, order: null })),
         ...customs.filter((r) => r.type === "sev").map((r) => ({ id: r.id, label: r.label, type: "sev", hidden: false, order: null })),
     ];
     const foods = [
-        ...TPL_FOODS.map((t) => ({ ...t, hidden: false, order: null })),
+        ...LEGACY_FOODS.map((t) => ({ ...t, hidden: false, order: null })),
         ...customs.filter((r) => r.type !== "sev").map((r) => ({ id: r.id, label: r.label, hidden: false, order: null })),
     ];
     const nems = (saved.nemOptions || TPL_NEMS).map((n) => ({ id: n, label: n, hidden: false, order: null }));
@@ -290,6 +342,7 @@ function App() {
     const [selectedDate, setSelectedDate] = useState(iso(new Date()));
     const [modal, setModal] = useState(null);
     const [editCard, setEditCard] = useState(null);
+    const [openSym, setOpenSym] = useState(null);
     // Supabase
     const [authReady, setAuthReady] = useState(!SUPABASE_ENABLED);
     const [session, setSession] = useState(null);
@@ -348,6 +401,7 @@ function App() {
         if (!SUPABASE_ENABLED)
             return;
         const s = document.createElement("script");
+        s.setAttribute("data-optional", "1");
         s.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
         s.onload = () => {
             const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -689,7 +743,7 @@ function App() {
             all.map((item, i) => {
                 const lastSevGuard = listName === "sym" && isLastVisibleSev(item);
                 return h("div", { className: "editrow" + (item.hidden ? " hid" : ""), key: item.id },
-                    h("span", { className: "editname" }, item.label, item.type === "check" && listName === "sym" ? h("small", { className: "typetag" }, " ja/nein") : null),
+                    h("span", { className: "editname" }, item.label),
                     h("span", { className: "editacts" },
                         h("button", { className: "act", disabled: i === 0, "aria-label": "nach oben", onClick: () => moveItem(listName, item.id, -1) }, ICONS.up("aico")),
                         h("button", { className: "act", disabled: i === all.length - 1, "aria-label": "nach unten", onClick: () => moveItem(listName, item.id, 1) }, ICONS.down("aico")),
@@ -723,15 +777,32 @@ function App() {
                     h("h2", null, "Symptome"),
                     h("button", { className: "editbtn" + (editCard === "sym" ? " on" : ""), "aria-label": "Symptome bearbeiten", onClick: () => setEditCard(editCard === "sym" ? null : "sym") }, ICONS.pencil("nico"))),
                 editCard === "sym" ? editList("sym", "Symptom") :
-                    visSym.map((row) => h("div", { className: "symrow", key: row.id },
-                        h("div", { className: "symlabel" }, row.label),
-                        row.type === "sev"
-                            ? h(StepSlider, { value: e[row.id] || "", onChange: (v) => update(selectedDate, row.id, v) })
-                            : h("div", { className: "segs segs2" }, [["ja", true], ["nein", false]].map(([lab, val]) => h("button", {
-                                key: lab,
-                                className: "seg segneutral" + (e[row.id] === val ? " on" : ""),
-                                onClick: () => update(selectedDate, row.id, e[row.id] === val ? null : val),
-                            }, lab))))),
+                    visSym.map((row) => {
+                        const open = openSym === row.id;
+                        const v = e[row.id];
+                        let valEl;
+                        if (row.type === "sev")
+                            valEl = v
+                                ? h(React.Fragment, null, h("span", { className: "valdot sev-" + v }), h("span", { className: "valword" }, v))
+                                : h("span", { className: "valempty" }, "–");
+                        else
+                            valEl = v === true ? h("span", { className: "valword" }, "ja")
+                                : v === false ? h("span", { className: "valword" }, "nein")
+                                    : h("span", { className: "valempty" }, "–");
+                        return h("div", { className: "symacc" + (open ? " open" : ""), key: row.id },
+                            h("button", { className: "symacchead", onClick: () => setOpenSym(open ? null : row.id) },
+                                h("span", { className: "symaccname" }, row.label),
+                                h("span", { className: "symaccval" }, valEl),
+                                h("span", { className: "chev2" + (open ? " o" : "") }, "▾")),
+                            open && h("div", { className: "symaccbody" },
+                                row.type === "sev"
+                                    ? h(StepSlider, { value: v || "", onChange: (val) => update(selectedDate, row.id, val) })
+                                    : h("div", { className: "segs segs2" }, [["ja", true], ["nein", false]].map(([lab, val]) => h("button", {
+                                        key: lab,
+                                        className: "seg segneutral" + (e[row.id] === val ? " on" : ""),
+                                        onClick: () => update(selectedDate, row.id, e[row.id] === val ? null : val),
+                                    }, lab)))));
+                    }),
                 editCard !== "sym" && h("button", { className: "addchip", onClick: () => setModal({ type: "addsym" }) }, "+ Symptom")),
             // --- Ernährung & Auslöser ---
             h("section", { className: "card card-trig" },
@@ -747,7 +818,7 @@ function App() {
                             const cls = v === true ? " yes" : v === false ? " no" : "";
                             return h("button", { key: row.id, className: "chip" + cls, onClick: () => cycle(selectedDate, row.id) }, (v === true ? "✓ " : "") + row.label);
                         })),
-                        h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neuer Auslöser", placeholder: "z. B. Weizen", submitLabel: "Hinzufügen", initial: "", action: { kind: "addfood" } }) }, "+ Auslöser"))),
+                        h("button", { className: "addchip", onClick: () => setModal({ type: "picker", list: "trig" }) }, "+ Auslöser"))),
             // --- NEM ---
             h("section", { className: "card card-nem" },
                 ICONS.pill("watermark"),
@@ -761,7 +832,7 @@ function App() {
                             const on = (e.nem || []).includes(row.label);
                             return h("button", { key: row.id, className: "chip" + (on ? " yes" : ""), onClick: () => toggleNem(selectedDate, row.label) }, (on ? "✓ " : "") + row.label);
                         })),
-                        h("button", { className: "addchip", onClick: () => setModal({ type: "input", title: "Neues NEM", placeholder: "z. B. Omega 3", submitLabel: "Hinzufügen", initial: "", action: { kind: "addnem" } }) }, "+ NEM"))),
+                        h("button", { className: "addchip", onClick: () => setModal({ type: "picker", list: "nem" }) }, "+ NEM"))),
             // --- Notiz ---
             h("section", { className: "card card-note" },
                 ICONS.pencil("watermark"),
@@ -889,6 +960,18 @@ function App() {
             onLogout: SUPABASE_ENABLED && session ? () => { sbRef.current?.auth.signOut(); setModal(null); } : null,
             onClose: () => setModal(null),
         }),
+        modal?.type === "picker" && h(PickerModal, {
+            title: modal.list === "trig" ? "Auslöser hinzufügen" : "NEM hinzufügen",
+            catalog: modal.list === "trig" ? CATALOG_FOODS : CATALOG_NEMS,
+            existing: (modal.list === "trig" ? foods : nems).map((x) => x.label),
+            onAdd: (l) => addItem(modal.list, l),
+            onDelete: (l) => {
+                const item = (modal.list === "trig" ? foods : nems).find((x) => x.label === l);
+                if (item)
+                    deleteItem(modal.list, item.id);
+            },
+            onClose: () => setModal(null),
+        }),
         modal?.type === "addsym" && h(AddSymptomModal, {
             onSubmit: (label, type) => { addItem("sym", label, type); setModal(null); },
             onClose: () => setModal(null),
@@ -920,45 +1003,21 @@ function SetupWizard({ onFinish }) {
     const [name, setName] = useState("");
     const [gender, setGender] = useState("");
     const [birthdate, setBirthdate] = useState("");
-    const [symSel, setSymSel] = useState(() => Object.fromEntries(TPL_SYMPTOMS.map((t) => [t.id, true])));
-    const [symCustom, setSymCustom] = useState([]);
-    const [foodSel, setFoodSel] = useState(() => Object.fromEntries(TPL_FOODS.map((t) => [t.id, true])));
-    const [foodCustom, setFoodCustom] = useState([]);
-    const [nemSel, setNemSel] = useState(() => Object.fromEntries(TPL_NEMS.map((n) => [n, true])));
-    const [nemCustom, setNemCustom] = useState([]);
-    const [txt, setTxt] = useState("");
-    const [symType, setSymType] = useState("sev");
+    // Bewusst nichts vorausgewählt — die Nutzerin trifft eine aktive Auswahl
+    const [symSel, setSymSel] = useState({});
+    const [foodList, setFoodList] = useState([]);
+    const [nemList, setNemList] = useState([]);
     const steps = ["Kind", "Symptome", "Ernährung", "NEM"];
-    const selectedSymCount = TPL_SYMPTOMS.filter((t) => symSel[t.id] && t.type === "sev").length +
-        symCustom.filter((c) => c.type === "sev").length;
-    function addCustom() {
-        const l = txt.trim();
-        if (!l)
-            return;
-        if (step === 1)
-            setSymCustom((p) => [...p, { label: l, type: symType }]);
-        if (step === 2)
-            setFoodCustom((p) => [...p, l]);
-        if (step === 3)
-            setNemCustom((p) => [...p, l]);
-        setTxt("");
-    }
+    const selectedSymAny = TPL_SYMPTOMS.filter((t) => symSel[t.id]).length;
+    const selectedSymSev = TPL_SYMPTOMS.filter((t) => symSel[t.id] && t.type === "sev").length;
     function finish() {
-        const symptoms = [
-            ...TPL_SYMPTOMS.filter((t) => symSel[t.id]).map((t) => ({ ...t, hidden: false, order: null })),
-            ...symCustom.map((c) => ({ id: newId(), label: c.label, type: c.type, hidden: false, order: null })),
-        ];
-        const foods = [
-            ...TPL_FOODS.filter((t) => foodSel[t.id]).map((t) => ({ ...t, hidden: false, order: null })),
-            ...foodCustom.map((l) => ({ id: newId(), label: l, hidden: false, order: null })),
-        ];
-        const nems = [
-            ...TPL_NEMS.filter((n) => nemSel[n]),
-            ...nemCustom,
-        ].map((n) => ({ id: n, label: n, hidden: false, order: null }));
+        const symptoms = TPL_SYMPTOMS.filter((t) => symSel[t.id]).map((t) => ({ ...t, hidden: false, order: null }));
+        const tplFoodByLabel = Object.fromEntries(TPL_FOODS.map((t) => [t.label, t.id]));
+        const foods = foodList.map((l) => ({ id: tplFoodByLabel[l] || newId(), label: l, hidden: false, order: null }));
+        const nems = nemList.map((n) => ({ id: n, label: n, hidden: false, order: null }));
         onFinish({ profile: { name: name.trim(), gender, birthdate }, symptoms, foods, nems });
     }
-    const canNext = step === 0 ? name.trim().length > 0 : step === 1 ? selectedSymCount > 0 : true;
+    const canNext = step === 0 ? name.trim().length > 0 : step === 1 ? selectedSymAny > 0 : true;
     const tplChips = (tpls, sel, setSel, getKey, getLabel) => h("div", { className: "setupgrid" }, tpls.map((t) => {
         const k = getKey(t);
         return h("button", {
@@ -974,7 +1033,7 @@ function SetupWizard({ onFinish }) {
             h("p", { className: "setupsub" }, "Richte das Ernährungstagebuch einmalig ein.")),
         h("div", { className: "setupdots" }, steps.map((s, i) => h("span", { key: s, className: "sdot2" + (i === step ? " on" : i < step ? " done" : "") }))),
         h("section", { className: "setupcard" },
-            h("h2", { className: "setuptitle" }, step === 0 ? "Dein Kind" : step === 1 ? "Welche Symptome willst du tracken?" : step === 2 ? "Welche Lebensmittel isst du regelmäßig?" : "Welche NEM nimmst du?"),
+            h("h2", { className: "setuptitle" }, step === 0 ? "Dein Kind" : step === 1 ? "Welche Symptome möchtest du beobachten?" : step === 2 ? "Welche Lebensmittel möchtest du beobachten?" : "Welche NEM möchtest du beobachten?"),
             step === 0 && h("div", { className: "setupform" },
                 h("label", { className: "flabel" }, "Name"),
                 h("input", { className: "modalinput", value: name, placeholder: "z. B. Mika", onChange: (e) => setName(e.target.value) }),
@@ -985,28 +1044,64 @@ function SetupWizard({ onFinish }) {
                 h("label", { className: "flabel" }, "Geburtsdatum"),
                 h("input", { className: "modalinput", type: "date", value: birthdate, onChange: (e) => setBirthdate(e.target.value) })),
             step === 1 && h(React.Fragment, null,
-                tplChips(TPL_SYMPTOMS, symSel, setSymSel, (t) => t.id, (t) => t.label + (t.type === "check" ? " (ja/nein)" : "")),
-                symCustom.length > 0 && h("div", { className: "setupgrid" }, symCustom.map((c, i) => h("button", { key: i, className: "chip setupchip yes", onClick: () => setSymCustom((p) => p.filter((_, j) => j !== i)) }, "✓ " + c.label + (c.type === "check" ? " (ja/nein)" : "")))),
-                h("div", { className: "typerow" },
-                    h("span", { className: "flabel" }, "Neues Symptom tracken mit:"),
-                    h("button", { className: "chip setupchip" + (symType === "sev" ? " yes" : ""), onClick: () => setSymType("sev") }, "Farbskala"),
-                    h("button", { className: "chip setupchip" + (symType === "check" ? " yes" : ""), onClick: () => setSymType("check") }, "ja/nein")),
-                selectedSymCount === 0 && h("p", { className: "setupwarn" }, "Mindestens ein Symptom mit Farbskala wird für die Analyse gebraucht.")),
-            step === 2 && h(React.Fragment, null,
-                tplChips(TPL_FOODS, foodSel, setFoodSel, (t) => t.id, (t) => t.label),
-                foodCustom.length > 0 && h("div", { className: "setupgrid" }, foodCustom.map((l, i) => h("button", { key: i, className: "chip setupchip yes", onClick: () => setFoodCustom((p) => p.filter((_, j) => j !== i)) }, "✓ " + l)))),
-            step === 3 && h(React.Fragment, null,
-                tplChips(TPL_NEMS, nemSel, setNemSel, (n) => n, (n) => n),
-                nemCustom.length > 0 && h("div", { className: "setupgrid" }, nemCustom.map((l, i) => h("button", { key: i, className: "chip setupchip yes", onClick: () => setNemCustom((p) => p.filter((_, j) => j !== i)) }, "✓ " + l)))),
-            step > 0 && h("div", { className: "addrow" },
-                h("input", { className: "modalinput", value: txt, placeholder: "Eigenes hinzufügen…", onChange: (e) => setTxt(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
-                        addCustom(); } }),
-                h("button", { className: "btn", onClick: addCustom, disabled: !txt.trim() }, "+"))),
+                tplChips(TPL_SYMPTOMS, symSel, setSymSel, (t) => t.id, (t) => t.label),
+                h("p", { className: "hint", style: { marginTop: "12px" } }, "Weitere Symptome kannst du später jederzeit in der App anlegen."),
+                selectedSymAny === 0 && h("p", { className: "setupwarn" }, "Wähle mindestens ein Symptom aus."),
+                selectedSymAny > 0 && selectedSymSev === 0 && h("p", { className: "setupwarn" }, "Tipp: Für die Analyse brauchst du mindestens ein Symptom mit Farbskala.")),
+            step === 2 && h(InstantPicker, {
+                catalog: CATALOG_FOODS,
+                selected: foodList,
+                onSelect: (l) => setFoodList((p) => [...p, l]),
+                onRemove: (l) => setFoodList((p) => p.filter((x) => x !== l)),
+            }),
+            step === 3 && h(InstantPicker, {
+                catalog: CATALOG_NEMS,
+                selected: nemList,
+                onSelect: (l) => setNemList((p) => [...p, l]),
+                onRemove: (l) => setNemList((p) => p.filter((x) => x !== l)),
+            })),
         h("div", { className: "setupnav" },
             step > 0 ? h("button", { className: "btn", onClick: () => setStep(step - 1) }, "Zurück") : h("span", null),
             step < 3
                 ? h("button", { className: "btn primary", disabled: !canNext, onClick: () => setStep(step + 1) }, "Weiter")
                 : h("button", { className: "btn primary", disabled: !canNext, onClick: finish }, "Los geht's!")));
+}
+// ================= Suchauswahl mit Standard-Katalog =================
+// Klick auf einen Listeneintrag fügt ihn sofort als Badge oben hinzu;
+// Klick auf ein Badge entfernt ihn wieder.
+function InstantPicker({ catalog, selected, existing, onSelect, onRemove, placeholder }) {
+    const [q, setQ] = useState("");
+    const qt = q.trim();
+    const taken = new Set([...selected, ...(existing || [])].map((x) => x.toLowerCase()));
+    const options = catalog.filter((c) => !taken.has(c.toLowerCase()) && c.toLowerCase().includes(qt.toLowerCase()));
+    const canFree = qt.length > 0
+        && !taken.has(qt.toLowerCase())
+        && !catalog.some((c) => c.toLowerCase() === qt.toLowerCase());
+    const pick = (label) => { onSelect(label); setQ(""); };
+    return h("div", { className: "picker" },
+        selected.length > 0 && h("div", { className: "badgewrap" },
+            selected.map((l) => h("button", { key: l, className: "pickbadge", onClick: () => onRemove(l) }, l, h("span", { className: "bx" }, "✕")))),
+        h("input", { className: "modalinput", value: q, placeholder: placeholder || "Suchen oder Neues eintippen…", onChange: (e) => setQ(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && canFree)
+                pick(qt); } }),
+        h("div", { className: "pickerlist" },
+            canFree && h("button", { key: "free", className: "pickrow free", onClick: () => pick(qt) },
+                h("span", { className: "pickbox" }, "+"), "„" + qt + "“ selbst anlegen"),
+            options.map((label) => h("button", { key: label, className: "pickrow", onClick: () => pick(label) },
+                h("span", { className: "pickbox" }, "+"), label)),
+            options.length === 0 && !canFree && h("p", { className: "hint", style: { margin: "8px 10px" } }, "Tippe oben, um etwas Eigenes hinzuzufügen.")));
+}
+function PickerModal({ title, catalog, existing, onAdd, onDelete, onClose }) {
+    const [added, setAdded] = useState([]);
+    return h(Sheet, { onClose },
+        h(SheetHead, { title, onClose }),
+        h(InstantPicker, {
+            catalog,
+            selected: added,
+            existing,
+            onSelect: (l) => { onAdd(l); setAdded((p) => [...p, l]); },
+            onRemove: (l) => { onDelete(l); setAdded((p) => p.filter((x) => x !== l)); },
+        }),
+        h("button", { className: "btn primary wide", onClick: onClose }, "Fertig"));
 }
 // ================= Auth =================
 function AuthScreen({ client }) {
@@ -1311,10 +1406,10 @@ function Style() {
         --ink: #f2f5fa; --mut: #8b96ab;
         --lime: #c3d63f; --lime-ink: #232b0a;
         --amber: #f59e0b; --amber-ink: #3a2503;
-        --c-sym: #e8794a; --c-sym-deep: #8a3a17;
-        --c-trig: #4fb8dd; --c-trig-deep: #0d5e80;
-        --c-nem: #56c778; --c-nem-deep: #14602f;
-        --c-note: #8f86e8; --c-note-deep: #3d34a0;
+        --c-sym: #4fb8dd; --c-sym-deep: #0d5e80;
+        --c-trig: #56c778; --c-trig-deep: #14602f;
+        --c-nem: #8f86e8; --c-nem-deep: #3d34a0;
+        --c-note: #e8794a; --c-note-deep: #8a3a17;
         --sev-kein: #4ade80; --sev-bisschen: #fbbf24; --sev-mittel: #fb923c; --sev-viel: #ef4444;
       }
       * { box-sizing: border-box; }
@@ -1358,10 +1453,10 @@ function Style() {
 
       /* Karten */
       .card { position: relative; overflow: hidden; border-radius: 24px; padding: 16px 16px 18px; margin: 12px 12px 0; color: #fff; }
-      .card-sym { background: var(--c-sym); }
-      .card-trig { background: var(--c-trig); }
-      .card-nem { background: var(--c-nem); }
-      .card-note { background: var(--c-note); }
+      .card-sym { background: var(--c-sym); --ctl: #2a89b0; --ctl2: #1e7095; }
+      .card-trig { background: var(--c-trig); --ctl: #2f9c58; --ctl2: #218045; }
+      .card-nem { background: var(--c-nem); --ctl: #675dc7; --ctl2: #5348ad; }
+      .card-note { background: var(--c-note); --ctl: #c05a2b; --ctl2: #a04a20; }
       .watermark { position: absolute; right: -14px; bottom: -18px; width: 110px; height: 110px; opacity: .18; pointer-events: none; }
       .cardhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       .card h2 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -0.01em; }
@@ -1372,7 +1467,7 @@ function Style() {
 
       /* Bearbeiten-Liste */
       .editlist { margin-top: 10px; position: relative; }
-      .editrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: rgba(0,0,0,.18); border-radius: 12px; padding: 7px 8px 7px 12px; margin-top: 6px; }
+      .editrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--ctl); border-radius: 12px; padding: 7px 8px 7px 12px; margin-top: 6px; }
       .editrow.hid { opacity: .45; }
       .editname { font-size: 13.5px; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .typetag { font-weight: 600; opacity: .7; font-size: 10.5px; }
@@ -1382,15 +1477,29 @@ function Style() {
       .aico { width: 15px; height: 15px; }
       .edithint { margin: 8px 0 0; font-size: 11.5px; color: rgba(255,255,255,.85); position: relative; }
 
-      /* Symptome: Slider */
-      .symrow { margin-top: 13px; position: relative; }
-      .symlabel { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
+      /* Symptome: Akkordeon */
+      .symacc { background: var(--ctl); border-radius: 14px; margin-top: 8px; position: relative; }
+      .symacchead { width: 100%; display: flex; align-items: center; gap: 8px; background: transparent; border: none; color: #fff; padding: 11px 12px; cursor: pointer; font: inherit; }
+      .symaccname { font-size: 14px; font-weight: 700; flex: 1; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .symaccval { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; flex: 0 0 auto; }
+      .valdot { width: 13px; height: 13px; border-radius: 50%; display: inline-block; }
+      .valdot.sev-kein { background: var(--sev-kein); }
+      .valdot.sev-bisschen { background: var(--sev-bisschen); }
+      .valdot.sev-mittel { background: var(--sev-mittel); }
+      .valdot.sev-viel { background: var(--sev-viel); }
+      .valword { color: #fff; }
+      .valempty { color: rgba(255,255,255,.55); font-weight: 800; }
+      .chev2 { font-size: 12px; color: rgba(255,255,255,.7); transition: transform .15s ease; flex: 0 0 auto; }
+      .chev2.o { transform: rotate(180deg); }
+      .symaccbody { padding: 0 12px 12px; }
+
+      /* Slider (opake Farben) */
       .slider { position: relative; height: 34px; touch-action: pan-y; cursor: pointer; }
-      .strack { position: absolute; top: 50%; left: 6%; right: 6%; height: 4px; border-radius: 2px; background: rgba(0,0,0,.28); transform: translateY(-50%); }
-      .sfill { position: absolute; top: 50%; height: 4px; border-radius: 2px; transform: translateY(-50%); opacity: .8; }
-      .sdot { position: absolute; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: rgba(0,0,0,.34); transform: translate(-50%,-50%); }
+      .strack { position: absolute; top: 50%; left: 6%; right: 6%; height: 4px; border-radius: 2px; background: var(--ctl2); transform: translateY(-50%); }
+      .sfill { position: absolute; top: 50%; height: 4px; border-radius: 2px; transform: translateY(-50%); }
+      .sdot { position: absolute; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--ctl2); transform: translate(-50%,-50%); }
       .sthumb { position: absolute; top: 50%; width: 22px; height: 22px; border-radius: 50%; transform: translate(-50%,-50%); box-shadow: 0 2px 6px rgba(0,0,0,.35); transition: left .12s ease; }
-      .sthumb.sneutral { background: var(--surface2); border: 2px solid rgba(255,255,255,.7); }
+      .sthumb.sneutral { background: #fff; }
       .sfill.sev-kein, .sthumb.sev-kein { background: var(--sev-kein); }
       .sfill.sev-bisschen, .sthumb.sev-bisschen { background: var(--sev-bisschen); }
       .sfill.sev-mittel, .sthumb.sev-mittel { background: var(--sev-mittel); }
@@ -1399,7 +1508,7 @@ function Style() {
       .sliderlabels span { flex: 1; text-align: center; font-size: 10px; font-weight: 700; color: rgba(255,255,255,.6); }
       .sliderlabels span.on { color: #fff; font-weight: 800; }
 
-      .segs { display: flex; gap: 3px; background: rgba(0,0,0,.22); border-radius: 999px; padding: 3px; margin-top: 6px; }
+      .segs { display: flex; gap: 3px; background: var(--ctl2); border-radius: 999px; padding: 3px; margin-top: 6px; }
       .segs2 { max-width: 220px; }
       .seg { flex: 1; border: none; background: transparent; color: rgba(255,255,255,.8); font-size: 12.5px; font-weight: 700; padding: 8px 0; border-radius: 999px; cursor: pointer; }
       .seg.segneutral.on { background: #fff; color: #333; }
@@ -1415,7 +1524,7 @@ function Style() {
       .addchip { margin-top: 14px; border: 1.5px dashed rgba(255,255,255,.6); background: transparent; color: #fff; border-radius: 999px; padding: 9px 16px; font-size: 13.5px; font-weight: 800; cursor: pointer; position: relative; }
 
       /* Notiz */
-      .notearea { width: 100%; min-height: 90px; margin-top: 12px; border: none; border-radius: 14px; background: rgba(0,0,0,.2); color: #fff; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; position: relative; }
+      .notearea { width: 100%; min-height: 90px; margin-top: 12px; border: none; border-radius: 14px; background: var(--ctl); color: #fff; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; position: relative; }
       .notearea::placeholder { color: rgba(255,255,255,.55); }
       .notearea:focus { outline: 2px solid rgba(255,255,255,.45); }
       .modalinput:focus, .csvbox:focus { outline: 2px solid rgba(195,214,63,.5); }
@@ -1456,8 +1565,8 @@ function Style() {
       .acard { background: var(--surface); border-radius: 20px; padding: 14px 16px; margin: 12px 12px 0; }
       .acard-next { border: 1.5px solid rgba(195,214,63,.5); }
       .ahead { margin: 0; font-size: 15px; font-weight: 800; color: var(--ink); }
-      .ah-hot { color: var(--c-sym); }
-      .ah-cool { color: var(--c-nem); }
+      .ah-hot { color: var(--c-note); }
+      .ah-cool { color: var(--c-trig); }
       .ah-lime { color: var(--lime); }
       .ahint { margin: 3px 0 0; font-size: 12px; color: var(--mut); }
       .atext { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--ink); }
@@ -1469,7 +1578,7 @@ function Style() {
       .resleg { font-size: 10.5px; color: var(--mut); width: 42px; flex: 0 0 auto; text-align: right; }
       .barwrap { flex: 1; display: flex; align-items: center; gap: 7px; }
       .bar { height: 9px; border-radius: 5px; min-width: 3px; }
-      .b-hot { background: var(--c-sym); }
+      .b-hot { background: var(--c-note); }
       .b-cool { background: var(--surface2); }
       .barval { font-size: 11px; color: var(--mut); font-weight: 700; }
       .achips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
@@ -1502,6 +1611,8 @@ function Style() {
       .typerow .flabel { margin: 0; }
       .setupgrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
       .setupgrid + .setupgrid { margin-top: 8px; }
+      .setupgrid2 { display: grid; grid-template-columns: 1fr 1fr; }
+      .setupgrid2 .setupchip { width: 100%; text-align: left; }
       .setupchip { border-color: var(--line); color: var(--ink); }
       .setupchip.yes { background: var(--lime); border-color: var(--lime); color: var(--lime-ink); }
       .setupwarn { margin: 10px 0 0; font-size: 12.5px; color: #ffb27d; font-weight: 600; }
@@ -1509,6 +1620,17 @@ function Style() {
       .setupnav .btn { min-width: 110px; padding: 13px; }
       .addrow { display: flex; gap: 6px; margin-top: 12px; }
       .addrow .modalinput { flex: 1; }
+      /* Suchauswahl mit Katalog */
+      .picker { margin-top: 4px; }
+      .pickerlist { max-height: 216px; overflow-y: auto; margin-top: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 4px; background: var(--surface2); }
+      .pickrow { display: flex; align-items: center; gap: 10px; width: 100%; border: none; background: transparent; color: var(--ink); padding: 9px 10px; border-radius: 9px; font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; }
+      .pickrow.on { background: rgba(195,214,63,.12); }
+      .pickrow.free { color: var(--lime); }
+      .pickbox { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--mut); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex: 0 0 auto; color: var(--mut); font-weight: 800; }
+      .badgewrap { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+      .pickbadge { display: inline-flex; align-items: center; gap: 7px; background: var(--lime); color: var(--lime-ink); border: none; border-radius: 999px; padding: 8px 13px; font-size: 13.5px; font-weight: 800; cursor: pointer; }
+      .pickbadge .bx { font-size: 11px; opacity: .65; }
+
       .authtabs { display: flex; background: var(--surface2); border-radius: 999px; padding: 3px; margin-bottom: 6px; }
       .authtab { flex: 1; border: none; background: transparent; color: var(--mut); font-size: 13.5px; font-weight: 800; padding: 9px 0; border-radius: 999px; cursor: pointer; }
       .authtab.on { background: var(--lime); color: var(--lime-ink); }
