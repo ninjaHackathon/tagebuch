@@ -59,6 +59,18 @@ const sevVal = (v) => {
     return i > 0 ? i - 1 : null;
 };
 const TPL_SYMPTOMS = [
+    { id: "s_reflux", label: "Reflux", type: "sev" },
+    { id: "s_blaehungen", label: "Blähungen", type: "sev" },
+    { id: "verstopfung", label: "Stuhlgang", type: "check" }, // id bleibt: Analyse wertet nein = seltener Stuhlgang
+    { id: "s_ausschlag", label: "Ausschlag", type: "sev" },
+    { id: "s_weinen", label: "Weinen / Unruhe", type: "sev" },
+    { id: "s_bauchweh", label: "Bauchweh / Koliken", type: "sev" },
+    { id: "s_spucken", label: "Spucken", type: "sev" },
+    { id: "s_schlaf", label: "Unruhiger Schlaf", type: "sev" },
+    { id: "s_wunderpo", label: "Wunder Po", type: "sev" },
+];
+// Nur für die Migration alter v2-Daten (feste ids der ursprünglichen Liste)
+const LEGACY_SYMPTOMS = [
     { id: "reflux_tag", label: "Reflux Tag", type: "sev" },
     { id: "reflux_nacht", label: "Reflux Nacht", type: "sev" },
     { id: "weinen_tag", label: "Weinen Tag", type: "sev" },
@@ -247,7 +259,7 @@ function loadStored() {
 function migrateV2(saved) {
     const customs = (saved.customRows || saved.customCols || []).map((r) => ({ ...r, type: r.type === "sev" ? "sev" : "check" }));
     const symptoms = [
-        ...TPL_SYMPTOMS.map((t) => ({ ...t, hidden: false, order: null })),
+        ...LEGACY_SYMPTOMS.map((t) => ({ ...t, hidden: false, order: null })),
         ...customs.filter((r) => r.type === "sev").map((r) => ({ id: r.id, label: r.label, type: "sev", hidden: false, order: null })),
     ];
     const foods = [
@@ -984,13 +996,15 @@ function SetupWizard({ onFinish }) {
     const [name, setName] = useState("");
     const [gender, setGender] = useState("");
     const [birthdate, setBirthdate] = useState("");
-    const [symSel, setSymSel] = useState(() => Object.fromEntries(TPL_SYMPTOMS.map((t) => [t.id, true])));
-    const [foodSel, setFoodSel] = useState(() => Object.fromEntries(TPL_FOODS.map((t) => [t.id, true])));
+    // Bewusst nichts vorausgewählt — die Nutzerin trifft eine aktive Auswahl
+    const [symSel, setSymSel] = useState({});
+    const [foodSel, setFoodSel] = useState({});
     const [foodCustom, setFoodCustom] = useState([]);
     const [nemSel, setNemSel] = useState({});
     const [nemCustom, setNemCustom] = useState([]);
     const steps = ["Kind", "Symptome", "Ernährung", "NEM"];
-    const selectedSymCount = TPL_SYMPTOMS.filter((t) => symSel[t.id] && t.type === "sev").length;
+    const selectedSymAny = TPL_SYMPTOMS.filter((t) => symSel[t.id]).length;
+    const selectedSymSev = TPL_SYMPTOMS.filter((t) => symSel[t.id] && t.type === "sev").length;
     function finish() {
         const symptoms = TPL_SYMPTOMS.filter((t) => symSel[t.id]).map((t) => ({ ...t, hidden: false, order: null }));
         const foods = [
@@ -1003,7 +1017,7 @@ function SetupWizard({ onFinish }) {
         ].map((n) => ({ id: n, label: n, hidden: false, order: null }));
         onFinish({ profile: { name: name.trim(), gender, birthdate }, symptoms, foods, nems });
     }
-    const canNext = step === 0 ? name.trim().length > 0 : step === 1 ? selectedSymCount > 0 : true;
+    const canNext = step === 0 ? name.trim().length > 0 : step === 1 ? selectedSymAny > 0 : true;
     const tplChips = (tpls, sel, setSel, getKey, getLabel, twoCol) => h("div", { className: "setupgrid" + (twoCol ? " setupgrid2" : "") }, tpls.map((t) => {
         const k = getKey(t);
         return h("button", {
@@ -1033,7 +1047,8 @@ function SetupWizard({ onFinish }) {
             step === 1 && h(React.Fragment, null,
                 tplChips(TPL_SYMPTOMS, symSel, setSymSel, (t) => t.id, (t) => t.label + (t.type === "check" ? " (ja/nein)" : "")),
                 h("p", { className: "hint", style: { marginTop: "12px" } }, "Weitere Symptome kannst du später jederzeit in der App anlegen."),
-                selectedSymCount === 0 && h("p", { className: "setupwarn" }, "Mindestens ein Symptom mit Farbskala wird für die Analyse gebraucht.")),
+                selectedSymAny === 0 && h("p", { className: "setupwarn" }, "Wähle mindestens ein Symptom aus."),
+                selectedSymAny > 0 && selectedSymSev === 0 && h("p", { className: "setupwarn" }, "Tipp: Für die Analyse brauchst du mindestens ein Symptom mit Farbskala.")),
             step === 2 && h(React.Fragment, null,
                 tplChips(TPL_FOODS, foodSel, setFoodSel, (t) => t.id, (t) => t.label),
                 customChips(foodCustom, setFoodCustom),
