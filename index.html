@@ -464,12 +464,17 @@ function App() {
         if (el && el.scrollIntoView)
             el.scrollIntoView({ inline: "center", block: "nearest" });
     }, [selectedDate, view, loaded, setupDone]);
-    // Verlauf rechts starten
-    useEffect(() => {
-        if (loaded && view === "week" && weekScrollRef.current)
-            weekScrollRef.current.scrollLeft = weekScrollRef.current.scrollWidth;
-    }, [view, loaded]);
     const dates = Object.keys(entries).sort();
+    // Verlauf rechts (heute) starten — auch wenn Daten nachladen (Sync) oder das Layout später fertig wird
+    useEffect(() => {
+        if (!loaded || view !== "week")
+            return;
+        const el = weekScrollRef.current;
+        if (!el)
+            return;
+        el.scrollLeft = el.scrollWidth;
+        requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
+    }, [view, loaded, dates.length]);
     function emptyDay() {
         return { notiz: "", nem: [] };
     }
