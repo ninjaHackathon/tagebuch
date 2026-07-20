@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
 <meta name="theme-color" content="#141b2b" />
 <title>Ernährungstagebuch</title>
 <style> html, body, #root { height: 100%; } body { margin: 0; background: #141b2b; } </style>
@@ -126,6 +126,8 @@ const CATALOG_FOODS = [
     "Kohlgemüse", "Zitrusfrüchte", "Koffein", "Schokolade / Kakao",
     "Scharf Gewürztes", "Alkohol", "Rindfleisch", "Schweinefleisch",
 ];
+// Rückkehr vom Bestätigungslink der Registrierungs-Mail erkennen (bevor supabase-js den Hash aufräumt)
+const CONFIRM_RETURN = typeof location !== "undefined" && /type=(signup|email_change|magiclink)/.test(location.hash);
 const STORAGE_V3 = "ernaehrungstagebuch:v3";
 const STORAGE_V2 = "ernaehrungstagebuch:v2";
 let idCounter = 0;
@@ -462,12 +464,17 @@ function App() {
         if (el && el.scrollIntoView)
             el.scrollIntoView({ inline: "center", block: "nearest" });
     }, [selectedDate, view, loaded, setupDone]);
-    // Verlauf rechts starten
-    useEffect(() => {
-        if (loaded && view === "week" && weekScrollRef.current)
-            weekScrollRef.current.scrollLeft = weekScrollRef.current.scrollWidth;
-    }, [view, loaded]);
     const dates = Object.keys(entries).sort();
+    // Verlauf rechts (heute) starten — auch wenn Daten nachladen (Sync) oder das Layout später fertig wird
+    useEffect(() => {
+        if (!loaded || view !== "week")
+            return;
+        const el = weekScrollRef.current;
+        if (!el)
+            return;
+        el.scrollLeft = el.scrollWidth;
+        requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
+    }, [view, loaded, dates.length]);
     function emptyDay() {
         return { notiz: "", nem: [] };
     }
@@ -783,7 +790,7 @@ function App() {
                         let valEl;
                         if (row.type === "sev")
                             valEl = v
-                                ? h(React.Fragment, null, h("span", { className: "valdot sev-" + v }), h("span", { className: "valword" }, v))
+                                ? h(React.Fragment, null, h("span", { className: "valword" }, v), h("span", { className: "valdot sev-" + v }))
                                 : h("span", { className: "valempty" }, "–");
                         else
                             valEl = v === true ? h("span", { className: "valword" }, "ja")
@@ -808,17 +815,17 @@ function App() {
             h("section", { className: "card card-trig" },
                 ICONS.apple("watermark"),
                 h("div", { className: "cardhead" },
-                    h("h2", null, "Ernährung & Auslöser"),
-                    h("button", { className: "editbtn" + (editCard === "trig" ? " on" : ""), "aria-label": "Auslöser bearbeiten", onClick: () => setEditCard(editCard === "trig" ? null : "trig") }, ICONS.pencil("nico"))),
-                editCard === "trig" ? editList("trig", "Auslöser") :
+                    h("h2", null, "Lebensmittel"),
+                    h("button", { className: "editbtn" + (editCard === "trig" ? " on" : ""), "aria-label": "Lebensmittel bearbeiten", onClick: () => setEditCard(editCard === "trig" ? null : "trig") }, ICONS.pencil("nico"))),
+                editCard === "trig" ? editList("trig", "Lebensmittel") :
                     h(React.Fragment, null,
                         h("p", { className: "cardsub" }, "Tippen: gegessen ✓ · nicht gegessen (blass) · unbekannt"),
-                        h("div", { className: "chipgrid" }, visFoods.map((row) => {
+                        h("div", { className: "chipgrid twocol" }, visFoods.map((row) => {
                             const v = e[row.id];
                             const cls = v === true ? " yes" : v === false ? " no" : "";
                             return h("button", { key: row.id, className: "chip" + cls, onClick: () => cycle(selectedDate, row.id) }, (v === true ? "✓ " : "") + row.label);
                         })),
-                        h("button", { className: "addchip", onClick: () => setModal({ type: "picker", list: "trig" }) }, "+ Auslöser"))),
+                        h("button", { className: "addchip", onClick: () => setModal({ type: "picker", list: "trig" }) }, "+ Lebensmittel"))),
             // --- NEM ---
             h("section", { className: "card card-nem" },
                 ICONS.pill("watermark"),
@@ -828,7 +835,7 @@ function App() {
                 editCard === "nem" ? editList("nem", "NEM") :
                     h(React.Fragment, null,
                         h("p", { className: "cardsub" }, "Nahrungsergänzung — heute eingenommen?"),
-                        h("div", { className: "chipgrid nemgrid" }, visNems.map((row) => {
+                        h("div", { className: "chipgrid twocol" }, visNems.map((row) => {
                             const on = (e.nem || []).includes(row.label);
                             return h("button", { key: row.id, className: "chip" + (on ? " yes" : ""), onClick: () => toggleNem(selectedDate, row.label) }, (on ? "✓ " : "") + row.label);
                         })),
@@ -843,7 +850,7 @@ function App() {
         const cols = dates;
         const sections = [
             { key: "sym", label: "Symptome", rows: visSym },
-            { key: "trig", label: "Ernährung & Auslöser", rows: visFoods.map((f) => ({ ...f, type: "check" })) },
+            { key: "trig", label: "Lebensmittel", rows: visFoods.map((f) => ({ ...f, type: "check" })) },
             { key: "nem", label: "NEM", rows: visNems.map((o) => ({ ...o, type: "nemopt" })) },
             { key: "note", label: "Notizen", rows: [{ id: "notiz", label: "Notiz", type: "notiz" }] },
         ];
@@ -861,7 +868,7 @@ function App() {
             if (v === true)
                 return h("span", { className: "wdot" }, "✓");
             if (v === false)
-                return h("span", { className: "wno" }, "–");
+                return h("span", { className: "wno" });
             return null;
         }
         return h("div", { className: "page" },
@@ -885,21 +892,21 @@ function App() {
                     ])))));
     }
     function analysisView() {
-        const a = analyzeStructured(entries, dates, symptoms, foods, nems);
-        const maxVal = Math.max(1, ...[...a.suspects, ...a.calm].flatMap((r) => [r.me, r.mu]));
-        const bar = (val, cls) => h("div", { className: "barwrap" },
-            h("div", { className: "bar " + cls, style: { width: Math.round((val / maxVal) * 100) + "%" } }),
-            h("span", { className: "barval" }, "Ø " + val.toFixed(1)));
-        const resultRow = (r) => h("div", { className: "resrow", key: r.label },
-            h("div", { className: "reslabel" }, r.label, r.constFlag ? h("span", { className: "resflag" }, " · auch seltener Stuhlgang") : null),
-            h("div", { className: "resbars" },
-                h("div", { className: "resline" }, h("span", { className: "resleg" }, "danach"), bar(r.me, "b-hot")),
-                h("div", { className: "resline" }, h("span", { className: "resleg" }, "ohne"), bar(r.mu, "b-cool"))));
+        const a = analyzePairs(entries, dates, symptoms, foods, nems);
+        const suspectCard = (t) => h("div", { className: "resrow", key: t.label },
+            h("div", { className: "reslabel" }, t.label),
+            t.pairs.slice(0, 3).map((pair) => h("div", { className: "pairrow", key: pair.sym },
+                h("div", { className: "pairtop" },
+                    h("span", { className: "pairsym" }, pair.sym),
+                    h("span", { className: "pairmeta" }, pair.lagText + " · " + pair.conf)),
+                h("div", { className: "pairbar" },
+                    h("div", { className: "pairfill", style: { width: Math.round(Math.min(1, pair.score) * 100) + "%" } })))));
+        const firstPair = a.suspects.length ? a.suspects[0] : null;
         return h("div", { className: "page" },
             h("div", { className: "weekintro" },
                 h("h2", { className: "pagetitle" }, "Analyse"),
                 h("p", { className: "pagesub" }, a.enough
-                    ? `Auswertung über ${a.dataDays} Tage · Nachwirken bis 72 h (Stillzeit) berücksichtigt`
+                    ? `Auswertung über ${a.dataDays} Tage mit Symptomdaten`
                     : "Noch zu wenig Daten für eine Auswertung")),
             !a.enough
                 ? h("section", { className: "acard" },
@@ -907,17 +914,17 @@ function App() {
                 : h(React.Fragment, null,
                     h("section", { className: "acard" },
                         h("h3", { className: "ahead ah-hot" }, "Mögliche Auslöser"),
-                        h("p", { className: "ahint" }, "Höhere Symptomlast in den 3 Tagen nach Verzehr/Einnahme — Lebensmittel und jedes NEM einzeln geprüft."),
+                        h("p", { className: "ahint" }, "Jedes Lebensmittel und jedes NEM wird einzeln auf jedes Symptom geprüft. Der Balken zeigt, wie viel stärker das Symptom nach dem Verzehr ist — der gleiche Tag zählt am stärksten, Nachwirken bis 72 h ist einberechnet."),
                         a.suspects.length === 0
-                            ? h("p", { className: "atext" }, "Kein Lebensmittel zeigt aktuell einen deutlichen Zusammenhang.")
-                            : a.suspects.slice(0, 5).map(resultRow)),
-                    a.suspects.length > 0 && h("section", { className: "acard acard-next" },
+                            ? h("p", { className: "atext" }, "Aktuell zeigt keine Kombination aus Auslöser und Symptom einen deutlichen Zusammenhang.")
+                            : a.suspects.slice(0, 6).map(suspectCard)),
+                    firstPair && h("section", { className: "acard acard-next" },
                         h("h3", { className: "ahead ah-lime" }, "Nächster Schritt"),
-                        h("p", { className: "atext" }, "Am aussagekräftigsten ist ein Auslassversuch: Lass „", h("strong", null, a.suspects[0].label), "“ ein paar Tage konsequent weg und beobachte, ob die Symptome zurückgehen.")),
+                        h("p", { className: "atext" }, "Am aussagekräftigsten ist ein Auslassversuch: Lass „", h("strong", null, firstPair.label), "“ 4–5 Tage konsequent weg und beobachte, ob „", h("strong", null, firstPair.pairs[0].sym), "“ zurückgeht. Wegen des Nachwirkens über die Muttermilch braucht die Besserung oft 2–3 Tage.")),
                     a.calm.length > 0 && h("section", { className: "acard" },
                         h("h3", { className: "ahead ah-cool" }, "Eher unverdächtig"),
-                        h("p", { className: "ahint" }, "Symptome danach tendenziell geringer."),
-                        a.calm.slice(0, 4).map(resultRow)),
+                        h("p", { className: "ahint" }, "Symptome nach dem Verzehr tendenziell geringer."),
+                        h("div", { className: "achips" }, a.calm.slice(0, 8).map((x) => h("span", { className: "achip", key: x }, x)))),
                     a.tooOften.length > 0 && h("section", { className: "acard" },
                         h("h3", { className: "ahead" }, "Nicht beurteilbar"),
                         h("p", { className: "ahint" }, "Fast täglich gegessen — es fehlen Vergleichstage ohne."),
@@ -961,7 +968,7 @@ function App() {
             onClose: () => setModal(null),
         }),
         modal?.type === "picker" && h(PickerModal, {
-            title: modal.list === "trig" ? "Auslöser hinzufügen" : "NEM hinzufügen",
+            title: modal.list === "trig" ? "Lebensmittel hinzufügen" : "NEM hinzufügen",
             catalog: modal.list === "trig" ? CATALOG_FOODS : CATALOG_NEMS,
             existing: (modal.list === "trig" ? foods : nems).map((x) => x.label),
             onAdd: (l) => addItem(modal.list, l),
@@ -1073,7 +1080,9 @@ function InstantPicker({ catalog, selected, existing, onSelect, onRemove, placeh
     const [q, setQ] = useState("");
     const qt = q.trim();
     const taken = new Set([...selected, ...(existing || [])].map((x) => x.toLowerCase()));
-    const options = catalog.filter((c) => !taken.has(c.toLowerCase()) && c.toLowerCase().includes(qt.toLowerCase()));
+    const options = catalog
+        .filter((c) => !taken.has(c.toLowerCase()) && c.toLowerCase().includes(qt.toLowerCase()))
+        .sort((a, b) => a.localeCompare(b, "de"));
     const canFree = qt.length > 0
         && !taken.has(qt.toLowerCase())
         && !catalog.some((c) => c.toLowerCase() === qt.toLowerCase());
@@ -1108,7 +1117,8 @@ function AuthScreen({ client }) {
     const [mode, setMode] = useState("login");
     const [email, setEmail] = useState("");
     const [pw, setPw] = useState("");
-    const [msg, setMsg] = useState(null);
+    // Nach Klick auf den Bestätigungslink: Erfolg anzeigen (falls nicht ohnehin automatisch angemeldet)
+    const [msg, setMsg] = useState(CONFIRM_RETURN ? { ok: true, t: "E-Mail-Bestätigung war erfolgreich! Du kannst dich jetzt anmelden." } : null);
     const [busy, setBusy] = useState(false);
     async function submit() {
         if (!email.trim() || (mode !== "reset" && pw.length < 6)) {
@@ -1128,7 +1138,7 @@ function AuthScreen({ client }) {
                 if (error)
                     setMsg({ ok: false, t: "Registrierung fehlgeschlagen: " + error.message });
                 else if (!data.session)
-                    setMsg({ ok: true, t: "Fast geschafft! Wir haben dir eine Bestätigungs-E-Mail geschickt. Bitte klicke den Link darin und melde dich danach hier an." });
+                    setMode("confirm"); // eigener Screen: Bitte E-Mail bestätigen
             }
             else {
                 const { error } = await client.auth.resetPasswordForEmail(email.trim(), { redirectTo: location.origin + location.pathname });
@@ -1140,6 +1150,16 @@ function AuthScreen({ client }) {
         }
         setBusy(false);
     }
+    if (mode === "confirm")
+        return h("div", { className: "setup" },
+            h("div", { className: "setuphead" },
+                h("div", { className: "setuplogo" }, "📬"),
+                h("h1", null, "Bitte bestätige deine E-Mail-Adresse"),
+                h("p", { className: "setupsub" }, "Wir haben dir eine E-Mail an ", h("strong", null, email.trim()), " geschickt.")),
+            h("section", { className: "setupcard" },
+                h("p", { className: "infotext" }, "Klicke auf den Bestätigungslink in der E-Mail. Danach wirst du automatisch angemeldet — oder du meldest dich hier mit deinem Passwort an."),
+                h("p", { className: "hint" }, "Keine E-Mail bekommen? Schau im Spam-Ordner nach."),
+                h("button", { className: "btn primary wide", onClick: () => { setMode("login"); setMsg(null); } }, "Zur Anmeldung")));
     return h("div", { className: "setup" },
         h("div", { className: "setuphead" },
             h("div", { className: "setuplogo" }, "🍼"),
@@ -1147,19 +1167,19 @@ function AuthScreen({ client }) {
             h("p", { className: "setupsub" }, "Melde dich an, damit deine Daten sicher gespeichert und auf allen Geräten verfügbar sind.")),
         h("section", { className: "setupcard" },
             h("div", { className: "authtabs" },
-                h("button", { className: "authtab" + (mode === "login" ? " on" : ""), onClick: () => { setMode("login"); setMsg(null); } }, "Anmelden"),
-                h("button", { className: "authtab" + (mode === "register" ? " on" : ""), onClick: () => { setMode("register"); setMsg(null); } }, "Registrieren")),
-            h("label", { className: "flabel" }, "E-Mail"),
-            h("input", { className: "modalinput", type: "email", autoComplete: "email", value: email, placeholder: "du@beispiel.de", onChange: (e) => setEmail(e.target.value) }),
-            mode !== "reset" && h(React.Fragment, null,
-                h("label", { className: "flabel" }, "Passwort"),
-                h("input", { className: "modalinput", type: "password", autoComplete: mode === "login" ? "current-password" : "new-password", value: pw, placeholder: "mind. 6 Zeichen", onChange: (e) => setPw(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
-                        submit(); } })),
-            msg && h("p", { className: msg.ok ? "okmsg" : "errmsg" }, msg.t),
-            h("button", { className: "btn primary wide", disabled: busy, onClick: submit }, busy ? "Bitte warten…" : mode === "login" ? "Anmelden" : mode === "register" ? "Konto erstellen" : "Link schicken"),
-            mode === "login" && h("button", { className: "linkbtn", onClick: () => { setMode("reset"); setMsg(null); } }, "Passwort vergessen?"),
-            mode === "reset" && h("button", { className: "linkbtn", onClick: () => { setMode("login"); setMsg(null); } }, "Zurück zur Anmeldung"),
-            mode === "register" && h("p", { className: "hint", style: { marginTop: "10px" } }, "Nach der Registrierung bekommst du eine E-Mail mit Bestätigungslink (Double-Opt-In).")));
+                h("button", { type: "button", className: "authtab" + (mode === "login" ? " on" : ""), onClick: () => { setMode("login"); setMsg(null); } }, "Anmelden"),
+                h("button", { type: "button", className: "authtab" + (mode === "register" ? " on" : ""), onClick: () => { setMode("register"); setMsg(null); } }, "Registrieren")),
+            // Echtes <form> mit name-Attributen, damit Passwort-Manager (1Password & Co.) die Felder erkennen
+            h("form", { onSubmit: (e) => { e.preventDefault(); submit(); } },
+                h("label", { className: "flabel", htmlFor: "auth-email" }, "E-Mail"),
+                h("input", { className: "modalinput", id: "auth-email", name: "email", type: "email", autoComplete: "email", value: email, placeholder: "du@beispiel.de", onChange: (e) => setEmail(e.target.value) }),
+                mode !== "reset" && h(React.Fragment, null,
+                    h("label", { className: "flabel", htmlFor: "auth-password" }, "Passwort"),
+                    h("input", { className: "modalinput", id: "auth-password", name: "password", type: "password", autoComplete: mode === "login" ? "current-password" : "new-password", value: pw, placeholder: "mind. 6 Zeichen", onChange: (e) => setPw(e.target.value) })),
+                msg && h("p", { className: msg.ok ? "okmsg" : "errmsg" }, msg.t),
+                h("button", { type: "submit", className: "btn primary wide", disabled: busy }, busy ? "Bitte warten…" : mode === "login" ? "Anmelden" : mode === "register" ? "Konto erstellen" : "Link schicken")),
+            mode === "login" && h("button", { type: "button", className: "linkbtn", onClick: () => { setMode("reset"); setMsg(null); } }, "Passwort vergessen?"),
+            mode === "reset" && h("button", { type: "button", className: "linkbtn", onClick: () => { setMode("login"); setMsg(null); } }, "Zurück zur Anmeldung")));
 }
 function NewPasswordModal({ client, onClose }) {
     const [pw, setPw] = useState("");
@@ -1182,7 +1202,23 @@ function NewPasswordModal({ client, onClose }) {
 }
 // ================= Sheets =================
 function Sheet({ onClose, children, className }) {
-    return h("div", { className: "sheet-bg", onClick: onClose },
+    const bgRef = useRef(null);
+    // Sheet über der Bildschirmtastatur halten: Höhe an den sichtbaren Viewport koppeln
+    useEffect(() => {
+        const vv = window.visualViewport;
+        if (!vv)
+            return;
+        const apply = () => { if (bgRef.current)
+            bgRef.current.style.height = (vv.height + vv.offsetTop) + "px"; };
+        apply();
+        vv.addEventListener("resize", apply);
+        vv.addEventListener("scroll", apply);
+        return () => {
+            vv.removeEventListener("resize", apply);
+            vv.removeEventListener("scroll", apply);
+        };
+    }, []);
+    return h("div", { className: "sheet-bg", ref: bgRef, onClick: onClose },
         h("div", { className: "sheet" + (className ? " " + className : ""), onClick: (e) => e.stopPropagation() },
             h("div", { className: "grab" }),
             children));
@@ -1319,83 +1355,131 @@ function CsvModal({ csv, onClose }) {
         h("a", { className: "btn wide dl", href: dataUrl, download: `ernaehrungstagebuch_${iso(new Date())}.csv` }, "Als Datei laden (falls unterstützt)"));
 }
 // ================= Analyse =================
-function analyzeStructured(entries, orderedDates, symptoms, foods, nems) {
-    // Alle NEM, die irgendwo eingetragen wurden (auch bereits gelöschte Optionen)
+function analyzePairs(entries, orderedDates, symptoms, foods, nems) {
+    // Zeitgewichtung: gleicher Tag am stärksten, bis 72 h nachwirkend
+    const DECAY = [1, 0.7, 0.4, 0.2];
+    // Symptomwert je Tag, normiert 0..1; null = an dem Tag nicht erfasst
+    const symDefs = symptoms.map((s) => ({
+        id: s.id,
+        type: s.type,
+        // Stuhlgang ist invertiert: "nein" (kein Stuhlgang) ist das Symptom
+        label: s.id === "verstopfung" ? s.label + " seltener" : s.label,
+        invert: s.id === "verstopfung",
+    }));
+    const dayVal = (e, s) => {
+        const v = e[s.id];
+        if (s.type === "sev") {
+            const n = sevVal(v);
+            return n === null ? null : n / 3;
+        }
+        if (v === true)
+            return s.invert ? 0 : 1;
+        if (v === false)
+            return s.invert ? 1 : 0;
+        return null;
+    };
+    // Auslöser: alle Lebensmittel + jedes NEM einzeln (auch bereits gelöschte, die in Einträgen stehen)
     const nemUsed = new Set(nems.map((n) => n.label));
-    orderedDates.forEach((d) => ((entries[d] || {}).nem || []).forEach((x) => nemUsed.add(x)));
-    const sevRows = symptoms.filter((s) => s.type === "sev");
-    const inputCols = [
+    orderedDates.forEach((d) => (((entries[d] || {}).nem) || []).forEach((x) => nemUsed.add(x)));
+    const triggers = [
         ...foods.map((f) => ({ id: f.id, label: f.label, kind: "check" })),
         ...[...nemUsed].map((n) => ({ id: n, label: "NEM: " + n, kind: "nem" })),
     ];
-    const load = {}, hasData = {}, constip = {}, idx = {};
-    orderedDates.forEach((d, i) => (idx[d] = i));
-    orderedDates.forEach((d) => {
-        const e = entries[d] || {};
-        let sum = 0, has = false;
-        sevRows.forEach((c) => { const n = sevVal(e[c.id]); if (n !== null) {
-            sum += n;
-            has = true;
-        } });
-        load[d] = sum;
-        hasData[d] = has;
-        constip[d] = e.verstopfung === false;
-    });
-    const dataDays = orderedDates.filter((d) => hasData[d]);
-    const out = { dataDays: dataDays.length, enough: dataDays.length >= 5, suspects: [], calm: [], tooOften: [], notUsed: [] };
+    const values = {};
+    symDefs.forEach((s) => { values[s.id] = orderedDates.map((d) => dayVal(entries[d] || {}, s)); });
+    const dataDays = orderedDates.filter((_, i) => symDefs.some((s) => values[s.id][i] !== null)).length;
+    const out = { dataDays, enough: dataDays >= 5, suspects: [], calm: [], tooOften: [], notUsed: [] };
     if (!out.enough)
         return out;
-    const results = [];
-    inputCols.forEach((col) => {
-        const consumed = new Set();
-        orderedDates.forEach((d) => {
+    triggers.forEach((t) => {
+        const cons = orderedDates.map((d) => {
             const e = entries[d] || {};
-            if (col.kind === "nem") {
-                if ((e.nem || []).includes(col.id))
-                    consumed.add(d);
-            }
-            else if (e[col.id] === true)
-                consumed.add(d);
+            return t.kind === "nem" ? ((e.nem || []).includes(t.id)) : e[t.id] === true;
         });
-        if (consumed.size === 0) {
-            out.notUsed.push(col.label);
+        if (!cons.some(Boolean)) {
+            out.notUsed.push(t.label);
             return;
         }
-        let expSum = 0, expN = 0, unSum = 0, unN = 0, expC = 0, unC = 0;
-        dataDays.forEach((d) => {
-            const i = idx[d];
-            let exposed = false;
-            for (let k = 0; k <= 3; k++) {
-                const pd = orderedDates[i - k];
-                if (pd && consumed.has(pd)) {
-                    exposed = true;
-                    break;
+        // Zeitgewichtete Exposition je Tag
+        const w = orderedDates.map((_, i) => {
+            let m = 0;
+            for (let k = 0; k < 4; k++) {
+                if (i - k >= 0 && cons[i - k])
+                    m = Math.max(m, DECAY[k]);
+            }
+            return m;
+        });
+        let evaluable = false;
+        let sumScore = 0, nScore = 0;
+        const pairs = [];
+        symDefs.forEach((s) => {
+            const vals = values[s.id];
+            let expSum = 0, expW = 0, expN = 0, unSum = 0, unN = 0;
+            vals.forEach((v, i) => {
+                if (v === null)
+                    return;
+                // Stark exponiert: Konsum heute/gestern. Basis: kein Konsum in den
+                // letzten 2 Tagen (Lag 3 zählt nur schwach). Der uneindeutige
+                // Zwischenbereich (nur Lag 2) wird ausgelassen — so bleiben auch
+                // regelmäßig eingenommene NEMs vergleichbar.
+                if (w[i] >= 0.5) {
+                    expSum += v * w[i];
+                    expW += w[i];
+                    expN++;
+                }
+                else if (w[i] < 0.3) {
+                    unSum += v;
+                    unN++;
+                }
+            });
+            if (expN < 2 || unN < 2)
+                return;
+            evaluable = true;
+            const score = expSum / expW - unSum / unN; // -1..+1
+            sumScore += score;
+            nScore++;
+            if (score <= 0.15)
+                return;
+            // Lag-Profil: bei welchem Abstand (0..3 Tage) ist der Zusammenhang am stärksten?
+            let bestLag = 0, bestDiff = -Infinity;
+            for (let k = 0; k < 4; k++) {
+                let aS = 0, aN = 0, bS = 0, bN = 0;
+                vals.forEach((v, i) => {
+                    if (v === null)
+                        return;
+                    if (i - k >= 0 && cons[i - k]) {
+                        aS += v;
+                        aN++;
+                    }
+                    else {
+                        bS += v;
+                        bN++;
+                    }
+                });
+                if (aN >= 2 && bN >= 2) {
+                    const diff = aS / aN - bS / bN;
+                    if (diff > bestDiff) {
+                        bestDiff = diff;
+                        bestLag = k;
+                    }
                 }
             }
-            if (exposed) {
-                expSum += load[d];
-                expN++;
-                if (constip[d])
-                    expC++;
-            }
-            else {
-                unSum += load[d];
-                unN++;
-                if (constip[d])
-                    unC++;
-            }
+            const lagText = bestLag === 0 ? "meist am selben Tag" : bestLag === 1 ? "meist 1 Tag später" : "oft verzögert (2–3 Tage)";
+            const conf = score >= 0.4 && expN >= 4 ? "deutlich" : score >= 0.25 || expN >= 5 ? "mittel" : "schwach";
+            pairs.push({ sym: s.label, symId: s.id, score, lagText, conf });
         });
-        if (expN < 2 || unN < 2) {
-            if (expN >= 2 && unN < 2)
-                out.tooOften.push(col.label);
+        if (!evaluable) {
+            out.tooOften.push(t.label);
             return;
         }
-        const me = expSum / expN, mu = unSum / unN;
-        results.push({ label: col.label, diff: me - mu, me, mu, constFlag: expC / expN - unC / unN > 0.25 });
+        if (pairs.length) {
+            pairs.sort((a, b) => b.score - a.score);
+            out.suspects.push({ label: t.label, pairs, maxScore: pairs[0].score });
+        }
+        else if (nScore > 0 && sumScore / nScore < -0.05)
+            out.calm.push(t.label);
     });
-    results.sort((a, b) => b.diff - a.diff);
-    out.suspects = results.filter((r) => r.diff > 0.5);
-    out.calm = results.filter((r) => r.diff < -0.5).sort((a, b) => a.diff - b.diff);
+    out.suspects.sort((a, b) => b.maxScore - a.maxScore);
     return out;
 }
 // ================= Styles =================
@@ -1515,8 +1599,8 @@ function Style() {
 
       /* Chips */
       .chipgrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; position: relative; }
-      .nemgrid { display: grid; grid-template-columns: 1fr 1fr; }
-      .nemgrid .chip { width: 100%; text-align: left; }
+      .twocol { display: grid; grid-template-columns: 1fr 1fr; }
+      .twocol .chip { width: 100%; text-align: left; }
       .chip { border: 1.5px solid rgba(255,255,255,.55); background: transparent; color: #fff; border-radius: 999px; padding: 9px 14px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
       .card-trig .chip.yes { background: #fff; border-color: #fff; color: var(--c-trig-deep); }
       .card-nem .chip.yes { background: #fff; border-color: #fff; color: var(--c-nem-deep); }
@@ -1558,7 +1642,7 @@ function Style() {
       .wsq.sev-mittel { background: var(--sev-mittel); }
       .wsq.sev-viel { background: var(--sev-viel); }
       .wdot { color: var(--ink); font-size: 12px; font-weight: 800; }
-      .wno { color: var(--mut); font-weight: 700; }
+      .wno { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--mut); opacity: .5; vertical-align: middle; }
       .wnote { color: var(--mut); font-size: 12px; }
 
       /* Analyse */
@@ -1570,17 +1654,14 @@ function Style() {
       .ah-lime { color: var(--lime); }
       .ahint { margin: 3px 0 0; font-size: 12px; color: var(--mut); }
       .atext { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--ink); }
-      .resrow { margin-top: 12px; }
-      .reslabel { font-size: 13.5px; font-weight: 700; }
-      .resflag { font-size: 11.5px; font-weight: 600; color: var(--mut); }
-      .resbars { margin-top: 5px; display: flex; flex-direction: column; gap: 3px; }
-      .resline { display: flex; align-items: center; gap: 8px; }
-      .resleg { font-size: 10.5px; color: var(--mut); width: 42px; flex: 0 0 auto; text-align: right; }
-      .barwrap { flex: 1; display: flex; align-items: center; gap: 7px; }
-      .bar { height: 9px; border-radius: 5px; min-width: 3px; }
-      .b-hot { background: var(--c-note); }
-      .b-cool { background: var(--surface2); }
-      .barval { font-size: 11px; color: var(--mut); font-weight: 700; }
+      .resrow { margin-top: 14px; }
+      .reslabel { font-size: 14px; font-weight: 800; }
+      .pairrow { margin-top: 7px; }
+      .pairtop { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+      .pairsym { font-size: 12.5px; font-weight: 700; }
+      .pairmeta { font-size: 10.5px; color: var(--mut); flex: 0 0 auto; }
+      .pairbar { height: 8px; border-radius: 4px; background: var(--surface2); margin-top: 4px; overflow: hidden; }
+      .pairfill { height: 100%; background: var(--c-note); border-radius: 4px; min-width: 4px; }
       .achips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
       .achip { background: var(--surface2); color: var(--ink); border-radius: 999px; padding: 4px 11px; font-size: 12px; font-weight: 600; }
       .disclaimer { margin: 14px 16px 0; font-size: 11.5px; line-height: 1.5; color: var(--mut); }
@@ -1638,7 +1719,7 @@ function Style() {
 
       /* Sheets */
       .sheet-bg { position: fixed; inset: 0; background: rgba(5,8,15,.6); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
-      .sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto; border-radius: 20px 20px 0 0; padding: 10px 16px 20px; box-shadow: 0 -8px 30px rgba(0,0,0,.4); animation: up .18s ease; }
+      .sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 460px; max-height: calc(100% - 24px); overflow-y: auto; border-radius: 20px 20px 0 0; padding: 10px 16px 20px; box-shadow: 0 -8px 30px rgba(0,0,0,.4); animation: up .18s ease; }
       .grab { width: 38px; height: 4px; border-radius: 2px; background: var(--surface2); margin: 2px auto 10px; }
       @keyframes up { from { transform: translateY(20px); opacity: .6 } to { transform: none; opacity: 1 } }
       .sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 15px; }
