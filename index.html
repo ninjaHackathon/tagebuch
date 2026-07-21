@@ -345,6 +345,11 @@ function App() {
     const [modal, setModal] = useState(null);
     const [editCard, setEditCard] = useState(null);
     const [openSym, setOpenSym] = useState(null);
+    // Analyse-Tab: Modus + Explorer-Auswahl
+    const [analyzeMode, setAnalyzeMode] = useState("auto");
+    const [exploreTrigger, setExploreTrigger] = useState(null); // trigger.label
+    const [exploreSyms, setExploreSyms] = useState([]); // symId[]
+    const [exploreDay, setExploreDay] = useState(null); // Index in Kalendertagen
     // Supabase
     const [authReady, setAuthReady] = useState(!SUPABASE_ENABLED);
     const [session, setSession] = useState(null);
@@ -893,6 +898,24 @@ function App() {
     }
     function analysisView() {
         const a = analyzePairs(entries, dates, symptoms, foods, nems);
+        const isoFindings = isolatedChanges(entries, dates, symptoms, foods, nems);
+        const calDates = calendarDates(dates);
+        const symDefById = {};
+        symDefsFrom(symptoms).forEach((s) => { symDefById[s.id] = s; });
+        const symColor = (id) => SYM_PALETTE[Math.max(0, visSym.findIndex((s) => s.id === id)) % SYM_PALETTE.length];
+        const pct = (v) => Math.round(v * 100) + "%";
+        const levelWord = (s, v) => v == null ? "nicht erfasst"
+            : (s.type === "sev" ? ["kein", "bisschen", "mittel", "viel"][Math.max(0, Math.min(3, Math.round(v * 3)))] : (v >= 0.5 ? "ja" : "nein"));
+        const exTriggers = triggersFrom(entries, dates, visFoods, visNems);
+        const openInExplorer = (triggerLabel, symId) => {
+            setExploreTrigger(triggerLabel);
+            setExploreSyms([symId]);
+            setExploreDay(null);
+            setAnalyzeMode("explore");
+        };
+        const toggleSym = (id) => setExploreSyms((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
+
+        // --- Auto-Analyse: Karten ---
         const suspectCard = (t) => h("div", { className: "resrow", key: t.label },
             h("div", { className: "reslabel" }, t.label),
             t.pairs.slice(0, 3).map((pair) => h("div", { className: "pairrow", key: pair.sym },
@@ -901,37 +924,113 @@ function App() {
                     h("span", { className: "pairmeta" }, pair.lagText + " · " + pair.conf)),
                 h("div", { className: "pairbar" },
                     h("div", { className: "pairfill", style: { width: Math.round(Math.min(1, pair.score) * 100) + "%" } })))));
+        const findingCard = (f) => h("button", { className: "isocard", key: f.triggerId + "|" + f.symId, onClick: () => openInExplorer(f.triggerLabel, f.symId) },
+            h("div", { className: "isohead" },
+                h("span", { className: "exdot", style: { background: symColor(f.symId) } }),
+                h("span", { className: "isosym" }, f.symLabel),
+                h("span", { className: "pairmeta" }, f.conf)),
+            h("p", { className: "isotext" }, f.kind === "onset"
+                ? h(React.Fragment, null, "Als „", h("strong", null, f.triggerLabel), "“ dazukam (", fmtShort(f.date), "), stieg „", h("strong", null, f.symLabel), "“ von ", pct(f.pre), " auf ", pct(f.post), ".")
+                : h(React.Fragment, null, "Nach dem Weglassen von „", h("strong", null, f.triggerLabel), "“ (", fmtShort(f.date), ") ging „", h("strong", null, f.symLabel), "“ von ", pct(f.pre), " auf ", pct(f.post), " zurück.")),
+            h("div", { className: "isospark" }, renderPairGraph({
+                calDates: f.win.map((w) => w.date),
+                exposure: { cons: f.win.map((w) => w.exposed), w: f.win.map((w) => w.exposed ? 1 : 0) },
+                onsets: f.win.map((w, idx) => (w.mark ? idx : -1)).filter((idx) => idx >= 0),
+                symLines: [{ id: f.symId, label: f.symLabel, color: symColor(f.symId), vals: f.win.map((w) => w.v) }],
+                mini: true,
+            })),
+            h("span", { className: "isolink" }, "Im Graphen ansehen →"));
         const firstPair = a.suspects.length ? a.suspects[0] : null;
+
+        const autoContent = !a.enough
+            ? h("section", { className: "acard" },
+                h("p", { className: "atext" }, `Bisher ${a.dataDays} Tag(e) mit erfassten Symptomen. Trage am besten mindestens 7–10 Tage durchgehend Symptome und Lebensmittel ein, dann werden mögliche Muster sichtbar.`))
+            : h(React.Fragment, null,
+                isoFindings.length > 0 && h("section", { className: "acard" },
+                    h("h3", { className: "ahead ah-lime" }, "Klarste Hinweise"),
+                    h("p", { className: "ahint" }, "Zeitpunkte, an denen sich nur ein einziger Auslöser geändert hat — dadurch am wenigsten von anderen Einflüssen überlagert. Tippe eine Karte, um sie im Graphen zu öffnen."),
+                    isoFindings.slice(0, 5).map(findingCard)),
+                h("section", { className: "acard" },
+                    h("h3", { className: "ahead ah-hot" }, isoFindings.length ? "Weitere mögliche Zusammenhänge" : "Mögliche Auslöser"),
+                    h("p", { className: "ahint" }, "Jedes Lebensmittel und jedes NEM wird einzeln auf jedes Symptom geprüft. Der Balken zeigt, wie viel stärker das Symptom nach dem Verzehr ist — der gleiche Tag zählt am stärksten, Nachwirken bis 72 h ist einberechnet."),
+                    a.suspects.length === 0
+                        ? h("p", { className: "atext" }, "Aktuell zeigt keine Kombination aus Auslöser und Symptom einen deutlichen Zusammenhang.")
+                        : a.suspects.slice(0, 6).map(suspectCard)),
+                firstPair && h("section", { className: "acard acard-next" },
+                    h("h3", { className: "ahead ah-lime" }, "Nächster Schritt"),
+                    h("p", { className: "atext" }, "Am aussagekräftigsten ist ein Auslassversuch: Lass „", h("strong", null, firstPair.label), "“ 4–5 Tage konsequent weg und beobachte, ob „", h("strong", null, firstPair.pairs[0].sym), "“ zurückgeht. Wegen des Nachwirkens über die Muttermilch braucht die Besserung oft 2–3 Tage.")),
+                a.calm.length > 0 && h("section", { className: "acard" },
+                    h("h3", { className: "ahead ah-cool" }, "Eher unverdächtig"),
+                    h("p", { className: "ahint" }, "Symptome nach dem Verzehr tendenziell geringer."),
+                    h("div", { className: "achips" }, a.calm.slice(0, 8).map((x) => h("span", { className: "achip", key: x }, x)))),
+                a.tooOften.length > 0 && h("section", { className: "acard" },
+                    h("h3", { className: "ahead" }, "Nicht beurteilbar"),
+                    h("p", { className: "ahint" }, "Fast täglich gegessen — es fehlen Vergleichstage ohne."),
+                    h("div", { className: "achips" }, a.tooOften.map((x) => h("span", { className: "achip", key: x }, x)))),
+                a.notUsed.length > 0 && h("section", { className: "acard" },
+                    h("h3", { className: "ahead" }, "Nie erfasst"),
+                    h("div", { className: "achips" }, a.notUsed.map((x) => h("span", { className: "achip", key: x }, x)))));
+
+        // --- Selbst erkunden: Graph ---
+        const selTrigger = exploreTrigger ? (exTriggers.find((t) => t.label === exploreTrigger) || null) : null;
+        const exposure = selTrigger ? triggerConsumption(entries, calDates, selTrigger) : null;
+        const onsets = exposure ? onsetIndices(exposure.cons) : [];
+        const symLines = exploreSyms.map((id) => {
+            const sd = symDefById[id];
+            if (!sd) return null;
+            return { id, label: sd.label, type: sd.type, color: symColor(id), vals: calDates.map((d) => daySymVal(entries[d] || {}, sd)) };
+        }).filter(Boolean);
+        const exploreContent = h("section", { className: "acard" },
+            h("div", { className: "exsel" },
+                h("div", { className: "exlabel" }, "Auslöser (einen wählen)"),
+                exTriggers.length === 0
+                    ? h("p", { className: "ahint" }, "Noch keine Lebensmittel oder NEM erfasst.")
+                    : h("div", { className: "exchips" }, exTriggers.map((t) => h("button", {
+                        key: t.label, className: "exchip" + (exploreTrigger === t.label ? " on trig" : ""),
+                        onClick: () => { setExploreTrigger(exploreTrigger === t.label ? null : t.label); setExploreDay(null); },
+                    }, t.label)))),
+            h("div", { className: "exsel" },
+                h("div", { className: "exlabel" }, "Symptome (beliebig viele)"),
+                h("div", { className: "exchips" }, visSym.map((s) => {
+                    const on = exploreSyms.includes(s.id);
+                    return h("button", {
+                        key: s.id, className: "exchip" + (on ? " on" : ""),
+                        style: on ? { borderColor: symColor(s.id), background: withAlpha(symColor(s.id), 0.16) } : null,
+                        onClick: () => toggleSym(s.id),
+                    }, h("span", { className: "exdot", style: { background: symColor(s.id) } }), s.label);
+                }))),
+            calDates.length < 2
+                ? h("p", { className: "atext" }, "Trage ein paar Tage ein, dann erscheint hier der Verlauf.")
+                : (!selTrigger && symLines.length === 0)
+                    ? h("p", { className: "atext" }, "Wähle oben einen Auslöser und ein oder mehrere Symptome — dann legt der Graph beides zeitlich übereinander. So siehst du direkt, ob und wie verzögert (Akkumulation über Tage) ein Symptom auf den Auslöser reagiert.")
+                    : h(React.Fragment, null,
+                        h("div", { className: "graphwrap" }, renderPairGraph({
+                            calDates, exposure, triggerLabel: selTrigger ? selTrigger.label : null,
+                            onsets, symLines, today, selDay: exploreDay, onSelDay: setExploreDay,
+                        })),
+                        selTrigger && h("div", { className: "exlegend" },
+                            h("span", { className: "lgi" }, h("span", { className: "lgsw expo" }), selTrigger.label + " · Einnahme/Nachwirken"),
+                            onsets.length > 0 && h("span", { className: "lgi" }, h("span", { className: "lgsw onset" }), "neu dazugekommen")),
+                        h("p", { className: "exhint" }, "Tipp: Tippe auf einen Tag im Graphen für die genauen Werte."),
+                        exploreDay != null && calDates[exploreDay] && h("div", { className: "exreadout" },
+                            h("div", { className: "exrday" }, fmtDay(calDates[exploreDay])),
+                            selTrigger && h("div", { className: "exrrow" },
+                                h("span", { className: "exrk" }, selTrigger.label),
+                                h("span", { className: "exrv" }, exposure.cons[exploreDay] ? "genommen" : exposure.w[exploreDay] > 0 ? "wirkt nach" : "—")),
+                            symLines.map((s) => h("div", { className: "exrrow", key: s.id },
+                                h("span", { className: "exrk" }, h("span", { className: "exdot", style: { background: s.color } }), s.label),
+                                h("span", { className: "exrv" }, levelWord(s, s.vals[exploreDay])))))));
+
         return h("div", { className: "page" },
             h("div", { className: "weekintro" },
                 h("h2", { className: "pagetitle" }, "Analyse"),
-                h("p", { className: "pagesub" }, a.enough
-                    ? `Auswertung über ${a.dataDays} Tage mit Symptomdaten`
-                    : "Noch zu wenig Daten für eine Auswertung")),
-            !a.enough
-                ? h("section", { className: "acard" },
-                    h("p", { className: "atext" }, `Bisher ${a.dataDays} Tag(e) mit erfassten Symptomen. Trage am besten mindestens 7–10 Tage durchgehend Symptome und Lebensmittel ein, dann werden mögliche Muster sichtbar.`))
-                : h(React.Fragment, null,
-                    h("section", { className: "acard" },
-                        h("h3", { className: "ahead ah-hot" }, "Mögliche Auslöser"),
-                        h("p", { className: "ahint" }, "Jedes Lebensmittel und jedes NEM wird einzeln auf jedes Symptom geprüft. Der Balken zeigt, wie viel stärker das Symptom nach dem Verzehr ist — der gleiche Tag zählt am stärksten, Nachwirken bis 72 h ist einberechnet."),
-                        a.suspects.length === 0
-                            ? h("p", { className: "atext" }, "Aktuell zeigt keine Kombination aus Auslöser und Symptom einen deutlichen Zusammenhang.")
-                            : a.suspects.slice(0, 6).map(suspectCard)),
-                    firstPair && h("section", { className: "acard acard-next" },
-                        h("h3", { className: "ahead ah-lime" }, "Nächster Schritt"),
-                        h("p", { className: "atext" }, "Am aussagekräftigsten ist ein Auslassversuch: Lass „", h("strong", null, firstPair.label), "“ 4–5 Tage konsequent weg und beobachte, ob „", h("strong", null, firstPair.pairs[0].sym), "“ zurückgeht. Wegen des Nachwirkens über die Muttermilch braucht die Besserung oft 2–3 Tage.")),
-                    a.calm.length > 0 && h("section", { className: "acard" },
-                        h("h3", { className: "ahead ah-cool" }, "Eher unverdächtig"),
-                        h("p", { className: "ahint" }, "Symptome nach dem Verzehr tendenziell geringer."),
-                        h("div", { className: "achips" }, a.calm.slice(0, 8).map((x) => h("span", { className: "achip", key: x }, x)))),
-                    a.tooOften.length > 0 && h("section", { className: "acard" },
-                        h("h3", { className: "ahead" }, "Nicht beurteilbar"),
-                        h("p", { className: "ahint" }, "Fast täglich gegessen — es fehlen Vergleichstage ohne."),
-                        h("div", { className: "achips" }, a.tooOften.map((x) => h("span", { className: "achip", key: x }, x)))),
-                    a.notUsed.length > 0 && h("section", { className: "acard" },
-                        h("h3", { className: "ahead" }, "Nie erfasst"),
-                        h("div", { className: "achips" }, a.notUsed.map((x) => h("span", { className: "achip", key: x }, x))))),
+                h("p", { className: "pagesub" }, analyzeMode === "explore"
+                    ? "Auslöser & Symptome selbst übereinanderlegen"
+                    : a.enough ? `Auswertung über ${a.dataDays} Tage mit Symptomdaten` : "Noch zu wenig Daten für eine Auswertung")),
+            h("div", { className: "segmented" },
+                h("button", { className: "segbtn" + (analyzeMode === "auto" ? " on" : ""), onClick: () => setAnalyzeMode("auto") }, "Automatisch"),
+                h("button", { className: "segbtn" + (analyzeMode === "explore" ? " on" : ""), onClick: () => setAnalyzeMode("explore") }, "Selbst erkunden")),
+            analyzeMode === "explore" ? exploreContent : autoContent,
             h("p", { className: "disclaimer" }, "Hinweis: Das sind statistische Muster, keine Beweise. Bei wenigen Tagen oder Lebensmitteln, die immer zusammen gegessen werden, können Scheinzusammenhänge entstehen. Anhaltende Beschwerden, Blut oder Schleim im Stuhl bitte kinderärztlich abklären."));
     }
     const avatarEmoji = profile.gender === "m" ? "👦" : profile.gender === "w" ? "👧" : "👶";
@@ -1355,36 +1454,64 @@ function CsvModal({ csv, onClose }) {
         h("a", { className: "btn wide dl", href: dataUrl, download: `ernaehrungstagebuch_${iso(new Date())}.csv` }, "Als Datei laden (falls unterstützt)"));
 }
 // ================= Analyse =================
-function analyzePairs(entries, orderedDates, symptoms, foods, nems) {
-    // Zeitgewichtung: gleicher Tag am stärksten, bis 72 h nachwirkend
-    const DECAY = [1, 0.7, 0.4, 0.2];
-    // Symptomwert je Tag, normiert 0..1; null = an dem Tag nicht erfasst
-    const symDefs = symptoms.map((s) => ({
+// Zeitgewichtung: gleicher Tag am stärksten, bis 72 h nachwirkend
+const DECAY = [1, 0.7, 0.4, 0.2];
+// Kategoriale Palette für die Symptomlinien im Explorer-Graphen (hell/dunkel-tauglich)
+const SYM_PALETTE = ["#4fb8dd", "#f7b955", "#61d095", "#ef6f6f", "#a78bfa", "#f472b6", "#2dd4bf", "#fb923c"];
+const withAlpha = (hex, a) => {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+};
+// Symptomwert je Tag, normiert 0..1; null = an dem Tag nicht erfasst.
+// Stuhlgang ist invertiert: "nein" (kein Stuhlgang) ist das Symptom.
+function symDefsFrom(symptoms) {
+    return symptoms.map((s) => ({
         id: s.id,
         type: s.type,
-        // Stuhlgang ist invertiert: "nein" (kein Stuhlgang) ist das Symptom
         label: s.id === "verstopfung" ? s.label + " seltener" : s.label,
         invert: s.id === "verstopfung",
     }));
-    const dayVal = (e, s) => {
-        const v = e[s.id];
-        if (s.type === "sev") {
-            const n = sevVal(v);
-            return n === null ? null : n / 3;
-        }
-        if (v === true)
-            return s.invert ? 0 : 1;
-        if (v === false)
-            return s.invert ? 1 : 0;
-        return null;
-    };
-    // Auslöser: alle Lebensmittel + jedes NEM einzeln (auch bereits gelöschte, die in Einträgen stehen)
+}
+function daySymVal(e, s) {
+    const v = e[s.id];
+    if (s.type === "sev") {
+        const n = sevVal(v);
+        return n === null ? null : n / 3;
+    }
+    if (v === true)
+        return s.invert ? 0 : 1;
+    if (v === false)
+        return s.invert ? 1 : 0;
+    return null;
+}
+// Auslöser: alle Lebensmittel + jedes NEM einzeln (auch bereits gelöschte, die in Einträgen stehen)
+function triggersFrom(entries, dates, foods, nems) {
     const nemUsed = new Set(nems.map((n) => n.label));
-    orderedDates.forEach((d) => (((entries[d] || {}).nem) || []).forEach((x) => nemUsed.add(x)));
-    const triggers = [
+    dates.forEach((d) => (((entries[d] || {}).nem) || []).forEach((x) => nemUsed.add(x)));
+    return [
         ...foods.map((f) => ({ id: f.id, label: f.label, kind: "check" })),
         ...[...nemUsed].map((n) => ({ id: n, label: "NEM: " + n, kind: "nem" })),
     ];
+}
+// Konsum-Flags + zeitgewichtete Exposition (Decay) je Tag für einen Auslöser
+function triggerConsumption(entries, dates, trigger) {
+    const cons = dates.map((d) => {
+        const e = entries[d] || {};
+        return trigger.kind === "nem" ? ((e.nem || []).includes(trigger.id)) : e[trigger.id] === true;
+    });
+    const w = dates.map((_, i) => {
+        let m = 0;
+        for (let k = 0; k < 4; k++)
+            if (i - k >= 0 && cons[i - k])
+                m = Math.max(m, DECAY[k]);
+        return m;
+    });
+    return { cons, w };
+}
+function analyzePairs(entries, orderedDates, symptoms, foods, nems) {
+    const symDefs = symDefsFrom(symptoms);
+    const dayVal = daySymVal;
+    const triggers = triggersFrom(entries, orderedDates, foods, nems);
     const values = {};
     symDefs.forEach((s) => { values[s.id] = orderedDates.map((d) => dayVal(entries[d] || {}, s)); });
     const dataDays = orderedDates.filter((_, i) => symDefs.some((s) => values[s.id][i] !== null)).length;
@@ -1392,23 +1519,11 @@ function analyzePairs(entries, orderedDates, symptoms, foods, nems) {
     if (!out.enough)
         return out;
     triggers.forEach((t) => {
-        const cons = orderedDates.map((d) => {
-            const e = entries[d] || {};
-            return t.kind === "nem" ? ((e.nem || []).includes(t.id)) : e[t.id] === true;
-        });
+        const { cons, w } = triggerConsumption(entries, orderedDates, t);
         if (!cons.some(Boolean)) {
             out.notUsed.push(t.label);
             return;
         }
-        // Zeitgewichtete Exposition je Tag
-        const w = orderedDates.map((_, i) => {
-            let m = 0;
-            for (let k = 0; k < 4; k++) {
-                if (i - k >= 0 && cons[i - k])
-                    m = Math.max(m, DECAY[k]);
-            }
-            return m;
-        });
         let evaluable = false;
         let sumScore = 0, nScore = 0;
         const pairs = [];
@@ -1482,6 +1597,213 @@ function analyzePairs(entries, orderedDates, symptoms, foods, nems) {
     out.suspects.sort((a, b) => b.maxScore - a.maxScore);
     return out;
 }
+
+// ---------- Explorer-Zeitreihe (Selbst-Analyse) ----------
+// Lückenlose Kalendertage über den gesamten Erfassungszeitraum.
+function calendarDates(dates) {
+    return dates.length ? buildRange(dates[0], dates[dates.length - 1]) : [];
+}
+// Baut für den Graphen: je Symptom eine 0..1-Reihe (null = nicht erfasst) über alle Kalendertage.
+function buildSymSeries(entries, calDates, symDefs) {
+    const series = {};
+    symDefs.forEach((s) => {
+        series[s.id] = calDates.map((d) => daySymVal(entries[d] || {}, s));
+    });
+    return series;
+}
+// Erster Konsumtag nach mind. 2 auslöserfreien Tagen ("frischer Auslöser dazugekommen").
+function onsetIndices(cons) {
+    const out = [];
+    cons.forEach((c, i) => {
+        if (c && (i === 0 || (!cons[i - 1] && (i < 2 || !cons[i - 2]))))
+            out.push(i);
+    });
+    return out;
+}
+
+// ---------- Isolations-Analyse ("Klarste Hinweise") ----------
+// Sucht Änderungspunkte, an denen sich möglichst NUR EIN Auslöser geändert hat, und misst
+// die Symptom-Reaktion davor/danach. So werden Überlagerungseffekte weitgehend ausgeschlossen.
+function isolatedChanges(entries, dates, symptoms, foods, nems) {
+    const calDates = calendarDates(dates);
+    const symDefs = symDefsFrom(symptoms);
+    const triggers = triggersFrom(entries, dates, foods, nems);
+    if (calDates.length < 5)
+        return [];
+    const symSeries = buildSymSeries(entries, calDates, symDefs);
+    // Konsum-Zustand aller Auslöser über die Kalendertage
+    const consMap = {};
+    triggers.forEach((t) => { consMap[t.label] = triggerConsumption(entries, calDates, t).cons; });
+    const PRE = 3, POST = 4; // Fenster vor/nach dem Änderungspunkt (Tage)
+    const findings = [];
+    // Ändert ein anderer Auslöser im Fenster [a..b] seinen Zustand? -> dann nicht isoliert.
+    const otherChanged = (selfLabel, i, a, b) => triggers.some((t2) => {
+        if (t2.label === selfLabel)
+            return false;
+        const c2 = consMap[t2.label];
+        for (let j = Math.max(1, a); j <= b && j < c2.length; j++)
+            if (c2[j] !== c2[j - 1])
+                return true;
+        return false;
+    });
+    const meanIn = (vals, from, to) => {
+        let s = 0, n = 0;
+        for (let j = Math.max(0, from); j <= to && j < vals.length; j++)
+            if (vals[j] !== null) { s += vals[j]; n++; }
+        return n ? { mean: s / n, n } : null;
+    };
+    triggers.forEach((t) => {
+        const cons = consMap[t.label];
+        // Änderungspunkte: Onset (frei -> Konsum) und Stopp (Konsum -> frei), je mit stabiler Basis
+        const events = [];
+        for (let i = 1; i < calDates.length; i++) {
+            const onset = cons[i] && !cons[i - 1] && (i < 2 || !cons[i - 2]);
+            const stop = !cons[i] && cons[i - 1] && (i < 2 || cons[i - 2]);
+            if (onset)
+                events.push({ i, kind: "onset" });
+            else if (stop)
+                events.push({ i, kind: "stop" });
+        }
+        events.forEach((ev) => {
+            const i = ev.i;
+            if (otherChanged(t.label, i, i - PRE, i + POST))
+                return; // nicht isoliert -> überspringen
+            symDefs.forEach((s) => {
+                const vals = symSeries[s.id];
+                const pre = meanIn(vals, i - PRE, i - 1);
+                const post = meanIn(vals, i, i + POST);
+                if (!pre || !post || pre.n < 2 || post.n < 2)
+                    return;
+                const delta = post.mean - pre.mean; // 0..1
+                // Onset: Anstieg verdächtig. Stopp: Rückgang = Besserung (Bestätigung).
+                const effect = ev.kind === "onset" ? delta : -delta;
+                if (effect < 0.18)
+                    return;
+                const conf = effect >= 0.34 && post.n >= 3 ? "deutlich" : effect >= 0.24 ? "mittel" : "schwach";
+                // Kleines Fenster für die Mini-Sparkline
+                const from = Math.max(0, i - PRE), to = Math.min(calDates.length - 1, i + POST);
+                const win = [];
+                for (let j = from; j <= to; j++)
+                    win.push({ date: calDates[j], v: vals[j], exposed: cons[j], mark: j === i });
+                findings.push({
+                    triggerLabel: t.label, triggerId: t.id, triggerKind: t.kind,
+                    symLabel: s.label, symId: s.id,
+                    kind: ev.kind, date: calDates[i], pre: pre.mean, post: post.mean,
+                    effect, conf, win,
+                });
+            });
+        });
+    });
+    // Beste zuerst; pro Auslöser×Symptom nur das stärkste Fenster behalten
+    findings.sort((a, b) => b.effect - a.effect);
+    const seen = new Set();
+    const dedup = [];
+    findings.forEach((f) => {
+        const key = f.triggerId + "|" + f.symId;
+        if (seen.has(key))
+            return;
+        seen.add(key);
+        dedup.push(f);
+    });
+    return dedup;
+}
+
+// Zusammenhängende Linien-Segmente (Indizes), an null-Tagen unterbrochen.
+function lineSegments(vals) {
+    const segs = [];
+    let cur = [];
+    vals.forEach((v, i) => {
+        if (v === null) { if (cur.length) { segs.push(cur); cur = []; } }
+        else cur.push(i);
+    });
+    if (cur.length) segs.push(cur);
+    return segs;
+}
+// Zeichnet den Explorer-Graphen als Inline-SVG.
+// cfg: { calDates, exposure:{cons,w}, triggerLabel, onsets:[i], symLines:[{id,label,color,vals}],
+//        today, selDay, onSelDay, mini:false }
+function renderPairGraph(cfg) {
+    const { calDates, exposure, symLines, today, selDay, onSelDay } = cfg;
+    const mini = !!cfg.mini;
+    const N = calDates.length;
+    if (!N)
+        return null;
+    const H = mini ? 84 : 210;
+    const PAD_L = mini ? 6 : 26, PAD_R = mini ? 6 : 10, PAD_T = mini ? 8 : 14, PAD_B = mini ? 16 : 42;
+    const colW = mini ? Math.max(10, Math.min(30, Math.round(220 / N)))
+                      : Math.max(26, Math.min(52, Math.round(500 / N)));
+    const plotW = N * colW;
+    const W = PAD_L + plotW + PAD_R;
+    const plotH = H - PAD_T - PAD_B;
+    const x = (i) => PAD_L + colW * (i + 0.5);
+    const y0 = PAD_T + plotH;
+    const y = (v) => PAD_T + plotH * (1 - Math.max(0, Math.min(1, v)));
+    const kids = [];
+    // y-Gridlines 0 / ½ / 1
+    [0, 0.5, 1].forEach((v) => {
+        kids.push(h("line", { key: "g" + v, x1: PAD_L, x2: W - PAD_R, y1: y(v), y2: y(v),
+            stroke: "var(--line)", strokeWidth: 1, strokeDasharray: v === 0 ? "0" : "2 4", opacity: 0.7 }));
+        if (!mini)
+            kids.push(h("text", { key: "gt" + v, x: PAD_L - 4, y: y(v) + 3, textAnchor: "end",
+                fontSize: 9, fill: "var(--mut)" }, v === 0 ? "0" : v === 1 ? "max" : "½"));
+    });
+    // Ausgewählte Spalte hervorheben
+    if (selDay != null && selDay >= 0 && selDay < N)
+        kids.push(h("rect", { key: "sel", x: x(selDay) - colW / 2, y: PAD_T, width: colW, height: plotH,
+            fill: "var(--lime)", opacity: 0.1 }));
+    // Auslöser-Exposition als Balken (Decay-Nachwirken sichtbar)
+    if (exposure) {
+        const barW = colW * 0.6;
+        exposure.w.forEach((wv, i) => {
+            if (wv <= 0)
+                return;
+            kids.push(h("rect", { key: "e" + i, x: x(i) - barW / 2, y: y(wv), width: barW, height: y0 - y(wv),
+                rx: 2, fill: "var(--mut)", fillOpacity: exposure.cons[i] ? 0.34 : 0.18 }));
+            if (exposure.cons[i])
+                kids.push(h("rect", { key: "ec" + i, x: x(i) - barW / 2, y: y(wv), width: barW, height: 3,
+                    rx: 1.5, fill: "var(--amber)" }));
+        });
+    }
+    // Onset-Marker: frischer Auslöser
+    (cfg.onsets || []).forEach((i) => {
+        kids.push(h("line", { key: "on" + i, x1: x(i) - colW / 2, x2: x(i) - colW / 2, y1: PAD_T, y2: y0,
+            stroke: "var(--amber)", strokeWidth: 1.4, strokeDasharray: "3 3", opacity: 0.85 }));
+    });
+    // Symptomlinien
+    (symLines || []).forEach((s) => {
+        lineSegments(s.vals).forEach((seg, si) => {
+            if (seg.length > 1)
+                kids.push(h("polyline", { key: s.id + "p" + si,
+                    points: seg.map((i) => x(i) + "," + y(s.vals[i])).join(" "),
+                    fill: "none", stroke: s.color, strokeWidth: mini ? 1.6 : 2.2,
+                    strokeLinecap: "round", strokeLinejoin: "round" }));
+        });
+        if (!mini)
+            s.vals.forEach((v, i) => {
+                if (v !== null)
+                    kids.push(h("circle", { key: s.id + "c" + i, cx: x(i), cy: y(v), r: 2.6, fill: s.color }));
+            });
+    });
+    // x-Achsen-Beschriftung + Klickflächen
+    if (!mini) {
+        const step = Math.max(1, Math.ceil(N / 8));
+        calDates.forEach((d, i) => {
+            const isToday = d === today;
+            if (i % step === 0 || isToday)
+                kids.push(h("text", { key: "x" + i, x: x(i), y: H - PAD_B + 14, textAnchor: "middle",
+                    fontSize: 9, fill: isToday ? "var(--lime)" : "var(--mut)",
+                    fontWeight: isToday ? 700 : 400 }, fmtShort(d)));
+        });
+        if (onSelDay)
+            calDates.forEach((d, i) => {
+                kids.push(h("rect", { key: "hit" + i, x: x(i) - colW / 2, y: PAD_T, width: colW, height: plotH,
+                    fill: "transparent", style: { cursor: "pointer" },
+                    onClick: () => onSelDay(selDay === i ? null : i) }));
+            });
+    }
+    return h("svg", { className: "pgraph", width: W, height: H, role: "img" }, kids);
+}
+
 // ================= Styles =================
 function Style() {
     return h("style", null, `
@@ -1665,6 +1987,45 @@ function Style() {
       .achips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
       .achip { background: var(--surface2); color: var(--ink); border-radius: 999px; padding: 4px 11px; font-size: 12px; font-weight: 600; }
       .disclaimer { margin: 14px 16px 0; font-size: 11.5px; line-height: 1.5; color: var(--mut); }
+
+      /* Analyse: Modus-Umschalter */
+      .segmented { display: flex; gap: 4px; margin: 10px 12px 0; background: var(--surface); border-radius: 14px; padding: 4px; }
+      .segbtn { flex: 1; border: none; background: transparent; color: var(--mut); font-size: 13px; font-weight: 800; padding: 9px 8px; border-radius: 11px; cursor: pointer; }
+      .segbtn.on { background: var(--lime); color: var(--lime-ink); }
+
+      /* Analyse: Explorer-Auswahl */
+      .exsel { margin-top: 4px; }
+      .exsel + .exsel { margin-top: 12px; }
+      .exlabel { font-size: 12px; font-weight: 700; color: var(--mut); margin-bottom: 7px; }
+      .exchips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .exchip { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid var(--line); background: var(--surface2); color: var(--ink); border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+      .exchip.on.trig { background: var(--amber); border-color: var(--amber); color: var(--amber-ink); }
+      .exdot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+
+      /* Analyse: Graph */
+      .graphwrap { margin-top: 14px; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 14px; background: var(--surface2); padding: 4px; }
+      .graphwrap::-webkit-scrollbar { height: 6px; }
+      .graphwrap::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+      .pgraph { display: block; }
+      .exlegend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+      .lgi { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--mut); }
+      .lgsw { width: 14px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+      .lgsw.expo { background: var(--mut); opacity: .5; }
+      .lgsw.onset { width: 0; height: 14px; border-left: 2px dashed var(--amber); border-radius: 0; }
+      .exhint { margin: 8px 0 0; font-size: 11.5px; color: var(--mut); }
+      .exreadout { margin-top: 10px; background: var(--surface2); border-radius: 12px; padding: 10px 12px; }
+      .exrday { font-size: 13px; font-weight: 800; margin-bottom: 6px; }
+      .exrrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12.5px; padding: 3px 0; }
+      .exrk { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); font-weight: 600; }
+      .exrv { color: var(--mut); font-weight: 700; flex: 0 0 auto; }
+
+      /* Analyse: Klarste Hinweise */
+      .isocard { display: block; width: calc(100% - 0px); text-align: left; border: 1.5px solid rgba(195,214,63,.35); background: var(--surface2); border-radius: 16px; padding: 12px 14px; margin-top: 10px; cursor: pointer; color: var(--ink); }
+      .isohead { display: flex; align-items: center; gap: 8px; }
+      .isosym { font-size: 14px; font-weight: 800; flex: 1; }
+      .isotext { margin: 7px 0 0; font-size: 13px; line-height: 1.5; color: var(--ink); }
+      .isospark { margin-top: 8px; overflow-x: auto; }
+      .isolink { display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 800; color: var(--lime); }
 
       /* Bottom-Nav */
       .bottomnav { position: fixed; left: 0; right: 0; bottom: 0; background: #101624; border-top: 1px solid #202b41;
